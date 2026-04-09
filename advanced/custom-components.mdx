@@ -1,0 +1,494 @@
+---
+title: 'Custom components'
+description: 'Replace built-in Milkdown UI components with your own implementations, or configure their behavior through the component config slices.'
+---
+
+Milkdown separates rendering from editing logic. Each interactive element — code blocks, images, tables, link tooltips, list markers — is implemented as a **component plugin** that owns its own DOM rendering. You can replace or configure any of these components without touching the core editing engine.
+
+## Available components
+
+The `@milkdown/kit/component` namespace exports six standalone component plugins:
+
+<CardGroup cols={2}>
+  <Card title="code-block" icon="code">
+    Syntax-highlighted code editor powered by CodeMirror with language picker, copy button, and optional preview panel.
+  </Card>
+  <Card title="image-block" icon="image">
+    Full-featured block image with upload, URL paste, caption, and resize handle.
+  </Card>
+  <Card title="image-inline" icon="image">
+    Inline image variant with upload and URL paste in a compact popover.
+  </Card>
+  <Card title="link-tooltip" icon="link">
+    Two-state tooltip (preview + edit) that appears when the cursor is on a link.
+  </Card>
+  <Card title="list-item-block" icon="list">
+    Custom list item markers for bullet, ordered, and task lists.
+  </Card>
+  <Card title="table-block" icon="table">
+    Table with drag-and-drop rows/columns, add/delete controls, and alignment options.
+  </Card>
+</CardGroup>
+
+## How the component registry works
+
+Each component plugin is a `MilkdownPlugin[]` array that pairs:
+
+1. A **config slice** — a `$ctx` slice that holds the component's configuration object
+2. A **view plugin** — a ProseMirror node view or plugin view that reads from the config slice and renders the UI
+
+Because the config is stored in the editor context (not hard-coded into the view), you can update it at any point in your editor's `.config()` chain before the editor is created:
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { codeBlockComponent, codeBlockConfig } from '@milkdown/kit/component/code-block'
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+      ...defaultConfig,
+      // Override only the fields you need
+      copyText: 'Copy code',
+    }))
+  })
+  .use(codeBlockComponent)
+  .create()
+```
+
+The `ctx.update` pattern merges your partial config with the default, so you only need to specify the properties you want to change.
+
+## Code block
+
+The code block component renders a CodeMirror editor inside each fenced code block node.
+
+### Config reference
+
+```typescript
+import type { CodeBlockConfig } from '@milkdown/kit/component/code-block'
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `extensions` | `Extension[]` | CodeMirror extensions (e.g. `basicSetup`, themes) |
+| `languages` | `LanguageDescription[]` | Language list shown in the picker |
+| `expandIcon` | `string` | HTML string for the picker expand button |
+| `searchIcon` | `string` | HTML string for the search icon |
+| `clearSearchIcon` | `string` | HTML string for the clear button |
+| `searchPlaceholder` | `string` | Placeholder text in the search box |
+| `noResultText` | `string` | Message shown when language search returns nothing |
+| `copyText` | `string` | Label on the copy button |
+| `copyIcon` | `string` | HTML string for the copy icon |
+| `onCopy` | `(text: string) => void` | Callback when the copy button is clicked |
+| `renderLanguage` | `(language: string, selected: boolean) => string` | Custom renderer for each language list item |
+| `renderPreview` | `(language, content, applyPreview) => void \| null \| string \| HTMLElement` | Render a preview panel for specific languages |
+| `previewToggleButton` | `(previewOnlyMode: boolean) => string` | HTML string for the toggle button |
+| `previewLabel` | `string` | Label above the preview panel |
+| `previewOnlyByDefault` | `boolean` | Start in preview-only mode |
+| `previewLoading` | `string \| HTMLElement` | Shown while preview is rendering |
+
+### Adding syntax highlighting
+
+```typescript
+import { languages } from '@codemirror/language-data'
+import { oneDark } from '@codemirror/theme-one-dark'
+import { defaultKeymap, indentWithTab } from '@codemirror/commands'
+import { keymap } from '@codemirror/view'
+import { basicSetup } from 'codemirror'
+import { codeBlockComponent, codeBlockConfig } from '@milkdown/kit/component/code-block'
+
+editor
+  .config((ctx) => {
+    ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+      ...defaultConfig,
+      languages,
+      extensions: [
+        basicSetup,
+        oneDark,
+        keymap.of([...defaultKeymap, indentWithTab]),
+      ],
+      renderLanguage: (language, selected) =>
+        `${selected ? '✓ ' : '   '}${language}`,
+    }))
+  })
+  .use(codeBlockComponent)
+```
+
+### Adding a preview panel
+
+The `renderPreview` function receives the language name, the code content as a string, and an `applyPreview` callback for async rendering:
+
+```typescript
+ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  renderPreview: (language, content, applyPreview) => {
+    // Async preview
+    if (language === 'mermaid') {
+      renderMermaid(content).then((svg) => applyPreview(svg))
+      return // return undefined to signal async
+    }
+
+    // Sync preview
+    if (language === 'html') {
+      return `<div>${content}</div>`
+    }
+
+    // No preview for this language
+    return null
+  },
+}))
+```
+
+### Custom copy handler
+
+```typescript
+ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  onCopy: (text) => {
+    navigator.clipboard.writeText(text)
+    showToast('Copied to clipboard')
+  },
+}))
+```
+
+## Image block
+
+The image block component handles both block-level (`![caption](url)`) and inline images.
+
+### Config reference
+
+**Block image (`imageBlockConfig`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `onUpload` | `(file: File) => Promise<string>` | Upload handler — return a URL |
+| `proxyDomURL` | `(url: string) => Promise<string> \| string` | Transform an image URL before display |
+| `onImageLoadError` | `(event: Event) => void \| Promise<void>` | Handle load failures |
+| `imageIcon` | `string \| undefined` | HTML string for the image placeholder icon |
+| `captionIcon` | `string \| undefined` | HTML string for the caption toggle icon |
+| `uploadButton` | `string \| undefined` | Upload button label |
+| `confirmButton` | `string \| undefined` | Confirm button label |
+| `uploadPlaceholderText` | `string` | Hint text inside the URL input |
+| `captionPlaceholderText` | `string` | Placeholder for the caption field |
+| `maxWidth` | `number` | Maximum display width in pixels |
+| `maxHeight` | `number` | Maximum display height in pixels |
+
+**Inline image (`inlineImageConfig`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `onUpload` | `(file: File) => Promise<string>` | Upload handler — return a URL |
+| `proxyDomURL` | `(url: string) => Promise<string> \| string` | Transform a URL before display |
+| `imageIcon` | `string \| undefined` | HTML string for the placeholder icon |
+| `uploadButton` | `string \| undefined` | Upload button label |
+| `confirmButton` | `string \| undefined` | Confirm button label |
+| `uploadPlaceholderText` | `string` | Hint text inside the URL input |
+
+### Custom upload handler
+
+```typescript
+import {
+  imageBlockComponent,
+  imageBlockConfig,
+} from '@milkdown/kit/component/image-block'
+import {
+  imageInlineComponent,
+  inlineImageConfig,
+} from '@milkdown/kit/component/image-inline'
+
+async function uploadToS3(file: File): Promise<string> {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await fetch('/api/upload', {
+    method: 'POST',
+    body: formData,
+  })
+  const { url } = await response.json()
+  return url
+}
+
+editor
+  .config((ctx) => {
+    ctx.update(imageBlockConfig.key, (defaultConfig) => ({
+      ...defaultConfig,
+      onUpload: uploadToS3,
+      uploadPlaceholderText: 'or paste an image URL...',
+      captionPlaceholderText: 'Add a caption',
+      maxWidth: 800,
+    }))
+
+    ctx.update(inlineImageConfig.key, (defaultConfig) => ({
+      ...defaultConfig,
+      onUpload: uploadToS3,
+    }))
+  })
+  .use(imageBlockComponent)
+  .use(imageInlineComponent)
+```
+
+### Handling load errors
+
+```typescript
+ctx.update(imageBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  onImageLoadError: (event) => {
+    const img = event.target as HTMLImageElement
+    img.src = '/images/broken-image-placeholder.svg'
+  },
+}))
+```
+
+### Proxying image URLs
+
+Use `proxyDomURL` to rewrite image URLs before they are set on the `<img>` element — useful for adding auth tokens or routing through an image proxy:
+
+```typescript
+ctx.update(imageBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  proxyDomURL: (url) => {
+    if (url.startsWith('https://private-storage.example.com')) {
+      return `https://image-proxy.example.com/?url=${encodeURIComponent(url)}&token=${getToken()}`
+    }
+    return url
+  },
+}))
+```
+
+## Link tooltip
+
+The link tooltip plugin renders two overlays: a preview tooltip (shown when reading) and an edit tooltip (shown when editing).
+
+### Config reference
+
+```typescript
+import { linkTooltipConfig } from '@milkdown/kit/component/link-tooltip'
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `linkIcon` | `string` | HTML string shown as the link icon in preview mode |
+| `editButton` | `string` | HTML string for the edit button |
+| `removeButton` | `string` | HTML string for the remove button |
+| `confirmButton` | `string` | Label on the confirm button in edit mode |
+| `onCopyLink` | `(link: string) => void` | Callback when a link is copied |
+| `inputPlaceholder` | `string` | Placeholder text in the URL input |
+
+```typescript
+import { linkTooltipPlugin, linkTooltipConfig } from '@milkdown/kit/component/link-tooltip'
+
+editor
+  .config((ctx) => {
+    ctx.update(linkTooltipConfig.key, (defaultConfig) => ({
+      ...defaultConfig,
+      inputPlaceholder: 'Paste or type a URL...',
+      confirmButton: 'Save',
+      onCopyLink: (link) => {
+        navigator.clipboard.writeText(link)
+      },
+    }))
+  })
+  .use(linkTooltipPlugin)
+```
+
+## List item block
+
+The list item component renders bullet markers, ordered list numbers, and task list checkboxes through a single `renderLabel` function.
+
+### Config reference
+
+```typescript
+import { listItemBlockConfig } from '@milkdown/kit/component/list-item-block'
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `renderLabel` | `(props: RenderLabelProps) => string` | Return an HTML string for the list marker |
+
+`RenderLabelProps`:
+
+```typescript
+interface RenderLabelProps {
+  label: string      // The auto-generated label (e.g. "1.", "2.")
+  listType: string   // 'bullet' | 'ordered' | 'task'
+  readonly?: boolean
+  checked?: boolean  // undefined for non-task items
+}
+```
+
+### Custom markers
+
+```typescript
+import { listItemBlockComponent, listItemBlockConfig } from '@milkdown/kit/component/list-item-block'
+
+editor
+  .config((ctx) => {
+    ctx.update(listItemBlockConfig.key, () => ({
+      renderLabel: ({ label, listType, checked }) => {
+        if (checked != null) {
+          // Task list — render a styled checkbox
+          return checked
+            ? '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#3b82f6"/><path d="M4 8l3 3 5-5" stroke="white" stroke-width="2" fill="none"/></svg>'
+            : '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="none" stroke="#94a3b8" stroke-width="1.5"/></svg>'
+        }
+        if (listType === 'bullet') {
+          return '•'
+        }
+        // Ordered list — keep the generated label
+        return label
+      },
+    }))
+  })
+  .use(listItemBlockComponent)
+```
+
+## Table block
+
+The table block renders drag handles, add/delete buttons, and alignment controls through a `renderButton` function.
+
+### Config reference
+
+```typescript
+import { tableBlockConfig, type RenderType } from '@milkdown/kit/component/table-block'
+```
+
+`RenderType` values:
+
+| Value | Control |
+|---|---|
+| `add_row` | Add row button |
+| `add_col` | Add column button |
+| `delete_row` | Delete row button |
+| `delete_col` | Delete column button |
+| `align_col_left` | Align column left button |
+| `align_col_center` | Align column center button |
+| `align_col_right` | Align column right button |
+| `col_drag_handle` | Column drag handle |
+| `row_drag_handle` | Row drag handle |
+
+### Custom table controls
+
+```typescript
+import { tableBlock, tableBlockConfig } from '@milkdown/kit/component/table-block'
+
+editor
+  .config((ctx) => {
+    ctx.update(tableBlockConfig.key, (defaultConfig) => ({
+      ...defaultConfig,
+      renderButton: (renderType) => {
+        switch (renderType) {
+          case 'add_row':
+          case 'add_col':
+            return '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+          case 'delete_row':
+          case 'delete_col':
+            return '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+          case 'align_col_left':
+            return '⬅'
+          case 'align_col_center':
+            return '⬛'
+          case 'align_col_right':
+            return '➡'
+          case 'col_drag_handle':
+          case 'row_drag_handle':
+            return '⠿'
+        }
+      },
+    }))
+  })
+  .use(tableBlock)
+```
+
+## Configuring components through Crepe
+
+When using Crepe, each component's config is exposed through the `featureConfigs` option on the `Crepe` constructor. You do not need to call `ctx.update` manually.
+
+```typescript
+import { Crepe } from '@milkdown/crepe'
+
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.CodeMirror]: {
+      // CodeMirrorFeatureConfig
+      languages,
+      theme: oneDark,
+      searchPlaceholder: 'Search language',
+      noResultText: 'No result',
+    },
+    [Crepe.Feature.ImageBlock]: {
+      // ImageBlockFeatureConfig
+      onUpload: uploadToS3,
+      blockUploadPlaceholderText: 'or paste an image URL',
+      blockCaptionPlaceholderText: 'Write a caption',
+      maxWidth: 720,
+    },
+    [Crepe.Feature.LinkTooltip]: {
+      // LinkTooltipFeatureConfig
+      inputPlaceholder: 'Paste link...',
+    },
+    [Crepe.Feature.Table]: {
+      // TableFeatureConfig — icon overrides map to renderButton
+      addRowIcon: '<svg>...</svg>',
+      deleteRowIcon: '<svg>...</svg>',
+    },
+    [Crepe.Feature.Toolbar]: {
+      // ToolbarFeatureConfig — icon overrides for the selection toolbar
+      boldIcon: '<svg>...</svg>',
+      italicIcon: '<svg>...</svg>',
+    },
+  },
+})
+
+await crepe.create()
+```
+
+<Tip>
+Crepe's `featureConfigs` accepts `Partial` types for every feature, so you only need to specify the options you want to change. All other options fall back to Crepe's own defaults (which already include SVG icons and sensible labels).
+</Tip>
+
+## Disabling individual features
+
+To disable a built-in Crepe feature entirely, set it to `false` in the `features` map:
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  features: {
+    [Crepe.Feature.Table]: false,       // Remove table support
+    [Crepe.Feature.Latex]: false,       // Remove math support
+    [Crepe.Feature.ImageBlock]: false,  // Remove image blocks
+  },
+})
+```
+
+Features not listed in `features` remain at their defaults (most are enabled by default; `TopBar`, `Diff`, and `Streaming` are disabled by default).
+
+## Adding custom toolbar items
+
+The Crepe selection toolbar accepts a `buildToolbar` callback in `ToolbarFeatureConfig` that gives you access to a `GroupBuilder`. Use it to append custom items to the existing groups or to create new groups:
+
+```typescript
+import { Crepe } from '@milkdown/crepe'
+import { commandsCtx } from '@milkdown/kit/core'
+import { toggleStrongCommand } from '@milkdown/kit/preset/commonmark'
+
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.Toolbar]: {
+      buildToolbar: (builder) => {
+        builder
+          .addGroup('custom', 'Custom')
+          .addItem('highlight', {
+            icon: '<svg>...</svg>',
+            active: () => false,
+            onRun: (ctx) => {
+              // Dispatch your custom command
+              ctx.get(commandsCtx).call(myHighlightCommand.key)
+            },
+          })
+      },
+    },
+  },
+})
+```

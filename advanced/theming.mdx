@@ -1,0 +1,361 @@
+---
+title: 'Theming'
+description: 'Customize the visual appearance of Milkdown using CSS custom properties, built-in themes, and dark mode support.'
+---
+
+Milkdown's visual layer is entirely driven by CSS custom properties. You override variables to change colors, fonts, and shadows — no build-step configuration required.
+
+## Crepe CSS custom properties
+
+When using the Crepe editor, every component reads from a shared set of `--crepe-*` CSS custom properties scoped to the `.milkdown` element. These are the properties you override to theme the editor.
+
+### Color tokens
+
+| Property | Purpose |
+|---|---|
+| `--crepe-color-background` | Editor canvas background |
+| `--crepe-color-on-background` | Default text color |
+| `--crepe-color-surface` | Floating panels, code blocks, toolbar |
+| `--crepe-color-surface-low` | Recessed surfaces (language picker, search box) |
+| `--crepe-color-on-surface` | Text on surface elements |
+| `--crepe-color-on-surface-variant` | Secondary text, labels, button text |
+| `--crepe-color-outline` | Borders, dividers, icon fill |
+| `--crepe-color-primary` | Accent color — active states, selection outlines |
+| `--crepe-color-secondary` | Chip backgrounds, confirm button background |
+| `--crepe-color-on-secondary` | Text on secondary background |
+| `--crepe-color-inverse` | Image operation button background |
+| `--crepe-color-on-inverse` | Text on inverse background |
+| `--crepe-color-inline-code` | Inline code text color |
+| `--crepe-color-error` | Error state color |
+| `--crepe-color-hover` | Hover highlight color |
+| `--crepe-color-selected` | Selected cell / active item background |
+| `--crepe-color-inline-area` | Inline selection area background |
+
+### Typography tokens
+
+| Property | Purpose |
+|---|---|
+| `--crepe-font-title` | Heading / title font stack |
+| `--crepe-font-default` | Body text and UI font stack |
+| `--crepe-font-code` | Monospace font for code blocks |
+
+### Shadow tokens
+
+| Property | Purpose |
+|---|---|
+| `--crepe-shadow-1` | Subtle elevation — toolbar, language picker |
+| `--crepe-shadow-2` | Higher elevation — floating panels |
+
+## Built-in themes
+
+Crepe ships three themes as CSS files (each with a light and dark variant). Import the one you want alongside the common styles.
+
+<Tabs>
+  <Tab title="Classic (default)">
+    ```typescript
+    import '@milkdown/crepe/theme/common/style.css'
+    import '@milkdown/crepe/theme/classic.css'
+    ```
+
+    A warm, paper-like palette.
+  </Tab>
+  <Tab title="Nord">
+    ```typescript
+    import '@milkdown/crepe/theme/common/style.css'
+    import '@milkdown/crepe/theme/nord.css'
+    ```
+
+    A blue-tinted palette derived from the Nord color system.
+  </Tab>
+  <Tab title="Frame">
+    ```typescript
+    import '@milkdown/crepe/theme/common/style.css'
+    import '@milkdown/crepe/theme/frame.css'
+    ```
+
+    A high-contrast monochrome theme.
+  </Tab>
+</Tabs>
+
+Each theme file sets the full set of `--crepe-*` tokens on `.milkdown`. Switching themes is a matter of swapping which file you import.
+
+## Dark mode
+
+Every built-in theme has a matching dark variant:
+
+| Light | Dark |
+|---|---|
+| `@milkdown/crepe/theme/classic.css` | `@milkdown/crepe/theme/classic-dark.css` |
+| `@milkdown/crepe/theme/nord.css` | `@milkdown/crepe/theme/nord-dark.css` |
+| `@milkdown/crepe/theme/frame.css` | `@milkdown/crepe/theme/frame-dark.css` |
+
+### System preference
+
+Serve light and dark tokens using a media query:
+
+```css
+/* your-theme.css */
+.milkdown {
+  --crepe-color-background: #fffdfb;
+  --crepe-color-on-background: #1f1b16;
+  --crepe-color-primary: #805610;
+  /* ... remaining light tokens */
+}
+
+@media (prefers-color-scheme: dark) {
+  .milkdown {
+    --crepe-color-background: #1f1b16;
+    --crepe-color-on-background: #eae1d9;
+    --crepe-color-primary: #f4bd6f;
+    /* ... remaining dark tokens */
+  }
+}
+```
+
+### Class-based toggling
+
+For a toggle button driven by JavaScript:
+
+```css
+.milkdown {
+  /* light defaults */
+  --crepe-color-background: #fffdfb;
+  --crepe-color-primary: #805610;
+}
+
+.dark .milkdown,
+.milkdown.dark {
+  /* dark overrides */
+  --crepe-color-background: #1f1b16;
+  --crepe-color-primary: #f4bd6f;
+}
+```
+
+```typescript
+document.documentElement.classList.toggle('dark')
+```
+
+## Creating a custom theme
+
+Define all required tokens on `.milkdown` in your own CSS file, then import it after the common styles:
+
+```css
+/* my-theme.css */
+.milkdown {
+  /* Colors */
+  --crepe-color-background: #f0f4f8;
+  --crepe-color-on-background: #1a202c;
+  --crepe-color-surface: #e2e8f0;
+  --crepe-color-surface-low: #cbd5e0;
+  --crepe-color-on-surface: #2d3748;
+  --crepe-color-on-surface-variant: #4a5568;
+  --crepe-color-outline: #718096;
+  --crepe-color-primary: #3182ce;
+  --crepe-color-secondary: #bee3f8;
+  --crepe-color-on-secondary: #1a365d;
+  --crepe-color-inverse: #2d3748;
+  --crepe-color-on-inverse: #e2e8f0;
+  --crepe-color-inline-code: #c53030;
+  --crepe-color-error: #c53030;
+  --crepe-color-hover: #ebf8ff;
+  --crepe-color-selected: #bee3f8;
+  --crepe-color-inline-area: #90cdf4;
+
+  /* Typography */
+  --crepe-font-title: 'Merriweather', Georgia, serif;
+  --crepe-font-default: 'Inter', system-ui, sans-serif;
+  --crepe-font-code: 'JetBrains Mono', monospace;
+
+  /* Shadows */
+  --crepe-shadow-1: 0px 1px 3px rgba(0, 0, 0, 0.12), 0px 1px 2px rgba(0, 0, 0, 0.24);
+  --crepe-shadow-2: 0px 3px 6px rgba(0, 0, 0, 0.15), 0px 2px 4px rgba(0, 0, 0, 0.12);
+}
+```
+
+```typescript
+import '@milkdown/crepe/theme/common/style.css'
+import './my-theme.css'
+```
+
+<Note>
+The common style sheet (`theme/common/style.css`) imports structural CSS for all components — layout, positioning, and interaction states. Always import it before your theme file.
+</Note>
+
+## Theme-nord plugin (standalone editor)
+
+When you use the lower-level `Editor` API without Crepe, the `@milkdown/plugin-theme-nord` package applies a self-contained Nord-style theme using Tailwind CSS utility classes.
+
+### Installation
+
+```bash
+npm install @milkdown/plugin-theme-nord
+```
+
+### Usage
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { nord } from '@milkdown/plugin-theme-nord'
+import '@milkdown/plugin-theme-nord/style.css'
+
+const editor = await Editor.make()
+  .config(nord)
+  .use(commonmark)
+  .create()
+```
+
+The `nord` function adds the `milkdown-theme-nord` and Tailwind `prose` classes to the ProseMirror editor view element, which activates all the Nord-specific CSS rules.
+
+### What the Nord theme styles
+
+The Nord theme styles the following elements via the `.milkdown-theme-nord` class:
+
+- **Headings** (h1–h6) — size and weight scale
+- **Blockquotes** — left border using `nord10` blue
+- **Inline code** — `nord10` text color, gray background pill
+- **Code blocks** — gray background, rounded, scrollable
+- **Tables** — striped rows, rounded border, shadow
+- **Lists** — proper markers using `nord10`
+- **Links** — underlined
+- **Images** — rounded with shadow
+
+## Styling individual components
+
+Crepe's component CSS lives inside `.milkdown { }` blocks. You can override any rule by adding more specific selectors after importing the theme.
+
+### Toolbar
+
+The selection toolbar uses `.milkdown-toolbar`:
+
+```css
+.milkdown .milkdown-toolbar {
+  /* Change toolbar background */
+  background: #1e293b;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+.milkdown .milkdown-toolbar .toolbar-item svg {
+  /* Change icon color */
+  color: #94a3b8;
+  fill: #94a3b8;
+}
+
+.milkdown .milkdown-toolbar .toolbar-item.active svg {
+  color: #60a5fa;
+  fill: #60a5fa;
+}
+```
+
+### Code blocks
+
+Code blocks render inside `.milkdown-code-block`. The CodeMirror editor inside inherits from the `--crepe-color-surface` token, so overriding that token is usually sufficient. For more targeted control:
+
+```css
+.milkdown .milkdown-code-block {
+  border-radius: 12px;
+  border: 1px solid var(--crepe-color-outline);
+}
+
+.milkdown .milkdown-code-block .cm-editor {
+  font-size: 13px;
+}
+
+.milkdown .milkdown-code-block .language-button {
+  font-size: 11px;
+}
+```
+
+### Tables
+
+Table handles and selection indicators use `--crepe-color-primary` for outlines and `--crepe-color-selected` for highlighted cells. To change the selected cell overlay:
+
+```css
+.milkdown .milkdown-table-block .selectedCell::after {
+  background-color: #3b82f6;
+  opacity: 0.2;
+}
+```
+
+### Image blocks
+
+Image block upload areas and the caption input use `--crepe-color-surface` and `--crepe-color-primary`. Override the confirm button style:
+
+```css
+.milkdown .milkdown-image-block .image-edit .confirm {
+  background: var(--crepe-color-primary);
+  color: #ffffff;
+  border-radius: 8px;
+}
+```
+
+## React and Vue best practices
+
+<Tabs>
+  <Tab title="React">
+    Scope your theme override to the editor container to avoid polluting global styles:
+
+    ```tsx
+    import '@milkdown/crepe/theme/common/style.css'
+    import '@milkdown/crepe/theme/nord.css'
+    import './editor-theme.css'
+
+    export function Editor() {
+      return (
+        <div className="editor-container">
+          {/* Milkdown mounts here */}
+        </div>
+      )
+    }
+    ```
+
+    ```css
+    /* editor-theme.css — scoped overrides */
+    .editor-container .milkdown {
+      --crepe-color-primary: #6366f1;
+      --crepe-font-default: 'Inter', sans-serif;
+    }
+    ```
+
+    For dark mode with Tailwind's `dark:` variant, add the dark token overrides under a `.dark` selector:
+
+    ```css
+    .dark .editor-container .milkdown {
+      --crepe-color-background: #0f172a;
+      --crepe-color-on-background: #f1f5f9;
+      --crepe-color-primary: #818cf8;
+    }
+    ```
+  </Tab>
+  <Tab title="Vue">
+    Use a scoped style block with `:deep()` to reach inside the editor's shadow boundary:
+
+    ```vue
+    <template>
+      <div class="editor-container">
+        <!-- Milkdown mounts here -->
+      </div>
+    </template>
+
+    <style scoped>
+    .editor-container :deep(.milkdown) {
+      --crepe-color-primary: #10b981;
+      --crepe-font-default: 'Inter', sans-serif;
+    }
+    </style>
+    ```
+
+    Import theme CSS globally in `main.ts`:
+
+    ```typescript
+    // main.ts
+    import '@milkdown/crepe/theme/common/style.css'
+    import '@milkdown/crepe/theme/classic.css'
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+Override `--crepe-color-primary` first — it controls active states, selection outlines, and link colors across all components simultaneously.
+</Tip>

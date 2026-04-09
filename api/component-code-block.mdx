@@ -1,0 +1,279 @@
+---
+title: "Code block"
+description: "A CodeMirror-powered code block component with language picker, syntax highlighting, and preview support."
+---
+
+The `codeBlockComponent` renders fenced code blocks using a full [CodeMirror](https://codemirror.net/) editor. It replaces the default ProseMirror code block node view and adds:
+
+- Language picker with fuzzy search
+- Syntax highlighting via CodeMirror language packages
+- Line numbers, code folding, and auto-completion (via `basicSetup`)
+- Copy-to-clipboard button
+- Optional preview panel for rendered output (e.g. LaTeX, diagrams)
+
+<Note>
+  The component ships without any CSS. You must write your own styles to match your design.
+</Note>
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/components
+```
+
+```bash yarn
+yarn add @milkdown/components
+```
+
+```bash pnpm
+pnpm add @milkdown/components
+```
+
+</CodeGroup>
+
+## Exports
+
+| Name | Kind | Description |
+|------|------|-------------|
+| `codeBlockComponent` | `MilkdownPlugin[]` | Plugin array — pass to `.use()` |
+| `codeBlockConfig` | `Ctx slice` | Config slice — update in `.config()` |
+| `codeBlockView` | `MilkdownPlugin` | The raw node view plugin |
+| `CodeBlockConfig` | `interface` | TypeScript config type |
+
+## Basic usage
+
+```typescript
+import { defaultKeymap } from '@codemirror/commands'
+import { languages } from '@codemirror/language-data'
+import { oneDark } from '@codemirror/theme-one-dark'
+import { keymap } from '@codemirror/view'
+import {
+  codeBlockComponent,
+  codeBlockConfig,
+} from '@milkdown/components/code-block'
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { basicSetup } from 'codemirror'
+
+await Editor.make()
+  .config((ctx) => {
+    ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+      ...defaultConfig,
+      languages,
+      extensions: [basicSetup, oneDark, keymap.of(defaultKeymap)],
+    }))
+  })
+  .use(commonmark)
+  .use(codeBlockComponent)
+  .create()
+```
+
+## Configuration
+
+Update `codeBlockConfig` inside `editor.config` to customize the component.
+
+```typescript
+editor.config((ctx) => {
+  ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+    ...defaultConfig,
+    // your overrides
+  }))
+})
+```
+
+### `CodeBlockConfig` interface
+
+<ResponseField name="extensions" type="Extension[]" default="[]">
+  CodeMirror extensions to load into every code block editor. Use `basicSetup` from the `codemirror` package to enable line numbers, syntax highlighting, bracket matching, and more.
+</ResponseField>
+
+<ResponseField name="languages" type="LanguageDescription[]" default="[]">
+  List of CodeMirror `LanguageDescription` objects. Import all bundled languages from `@codemirror/language-data`, or define your own. Drives the language picker.
+</ResponseField>
+
+<ResponseField name="expandIcon" type="string" default='"⬇"'>
+  Icon shown on the button that opens the language picker dropdown.
+</ResponseField>
+
+<ResponseField name="searchIcon" type="string" default='"🔍"'>
+  Icon shown inside the language search input.
+</ResponseField>
+
+<ResponseField name="clearSearchIcon" type="string" default='"⌫"'>
+  Icon shown on the button that clears the language search input.
+</ResponseField>
+
+<ResponseField name="searchPlaceholder" type="string" default='"Search language"'>
+  Placeholder text rendered inside the language search input.
+</ResponseField>
+
+<ResponseField name="noResultText" type="string" default='"No result"'>
+  Text displayed when the language search returns no matches.
+</ResponseField>
+
+<ResponseField name="copyText" type="string" default='"Copy"'>
+  Label on the copy button.
+</ResponseField>
+
+<ResponseField name="copyIcon" type="string" default='"📋"'>
+  Icon on the copy button.
+</ResponseField>
+
+<ResponseField name="onCopy" type="(text: string) => void">
+  Callback invoked after the copy button is pressed. Receives the code content as a string. Defaults to a no-op.
+</ResponseField>
+
+<ResponseField name="renderLanguage" type="(language: string, selected: boolean) => string" default="(language) => language">
+  Controls how each language name is rendered in the picker list. Must return a plain string (not HTML). Use `selected` to add a checkmark or highlight.
+</ResponseField>
+
+<ResponseField name="renderPreview" type="(language: string, content: string, applyPreview: (value: null | string | HTMLElement) => void) => void | null | string | HTMLElement" default="() => null">
+  Function to render a live preview panel below the code. Return values:
+
+  - `null` — hide the preview panel
+  - `string` or `HTMLElement` — show synchronously
+  - `undefined` — show `previewLoading` while rendering asynchronously; call `applyPreview(result)` when ready
+</ResponseField>
+
+<ResponseField name="previewToggleButton" type="(previewOnlyMode: boolean) => string" default='(mode) => mode ? "Edit" : "Hide"'>
+  Renders the label for the button that toggles between code-only and preview-only modes. Must return a string.
+</ResponseField>
+
+<ResponseField name="previewLabel" type="string" default='"Preview"'>
+  Label shown in the preview panel header.
+</ResponseField>
+
+<ResponseField name="previewOnlyByDefault" type="boolean">
+  When `true`, the block opens in preview-only mode. Defaults to `true` in read-only editors.
+</ResponseField>
+
+<ResponseField name="previewLoading" type="string | HTMLElement" default='"Loading..."'>
+  Content displayed in the preview panel while an async `renderPreview` call is pending.
+</ResponseField>
+
+## Configuration examples
+
+### Add languages
+
+```typescript
+import { LanguageDescription } from '@codemirror/language'
+import { languages } from '@codemirror/language-data'
+import { codeBlockConfig } from '@milkdown/components/code-block'
+
+// Use the full bundled list
+ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  languages,
+}))
+
+// Or define a custom subset
+const myLanguages = [
+  LanguageDescription.of({
+    name: 'JavaScript',
+    alias: ['ecmascript', 'js', 'node'],
+    extensions: ['js', 'mjs', 'cjs'],
+    load() {
+      return import('@codemirror/lang-javascript').then((m) => m.javascript())
+    },
+  }),
+  LanguageDescription.of({
+    name: 'CSS',
+    extensions: ['css'],
+    load() {
+      return import('@codemirror/lang-css').then((m) => m.css())
+    },
+  }),
+]
+
+ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  languages: myLanguages,
+}))
+```
+
+### Add CodeMirror extensions
+
+```typescript
+import { defaultKeymap, indentWithTab } from '@codemirror/commands'
+import { oneDark } from '@codemirror/theme-one-dark'
+import { keymap } from '@codemirror/view'
+import { codeBlockConfig } from '@milkdown/components/code-block'
+import { basicSetup } from 'codemirror'
+
+ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  extensions: [
+    keymap.of(defaultKeymap.concat(indentWithTab)),
+    basicSetup,
+    oneDark,
+  ],
+}))
+```
+
+### Custom language renderer
+
+```typescript
+import { codeBlockConfig } from '@milkdown/components/code-block'
+
+ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  renderLanguage: (language, selected) =>
+    selected ? `✔ ${language}` : language,
+}))
+```
+
+### Copy callback
+
+```typescript
+import { codeBlockConfig } from '@milkdown/components/code-block'
+
+ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  onCopy: (text) => {
+    navigator.clipboard.writeText(text)
+    showToast('Copied to clipboard')
+  },
+}))
+```
+
+### Async preview panel
+
+```typescript
+import { codeBlockConfig } from '@milkdown/components/code-block'
+
+ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  renderPreview: (language, content, applyPreview) => {
+    // Synchronous — return directly
+    if (language === 'html') {
+      const el = document.createElement('div')
+      el.innerHTML = content
+      return el
+    }
+
+    // Asynchronous — return undefined, call applyPreview when ready
+    if (language === 'JavaScript') {
+      compileAndRun(content).then((result) => applyPreview(result))
+      return undefined
+    }
+
+    // No preview for this language
+    return null
+  },
+  previewLoading: 'Compiling...',
+}))
+```
+
+### Preview toggle button
+
+```typescript
+import { codeBlockConfig } from '@milkdown/components/code-block'
+
+ctx.update(codeBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  previewToggleButton: (previewOnlyMode) =>
+    previewOnlyMode ? 'Show code' : 'Hide code',
+}))
+```

@@ -1,0 +1,149 @@
+---
+title: preset-gfm
+description: GitHub Flavored Markdown preset for Milkdown — tables, task lists, strikethrough, and footnotes on top of CommonMark.
+---
+
+The `@milkdown/preset-gfm` package extends the CommonMark preset with [GitHub Flavored Markdown](https://github.github.com/gfm/) features: tables, task list items, strikethrough, and footnotes.
+
+<Warning>
+  The GFM preset must be used together with `@milkdown/preset-commonmark`. Load `commonmark` before `gfm`.
+</Warning>
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/preset-commonmark @milkdown/preset-gfm
+```
+
+```bash yarn
+yarn add @milkdown/preset-commonmark @milkdown/preset-gfm
+```
+
+```bash pnpm
+pnpm add @milkdown/preset-commonmark @milkdown/preset-gfm
+```
+
+</CodeGroup>
+
+## Usage
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { gfm } from '@milkdown/kit/preset/gfm'
+
+Editor.make().use(commonmark).use(gfm).create()
+```
+
+### `gfm`
+
+An array of `MilkdownPlugin` values that registers the full GFM feature set on top of CommonMark.
+
+```typescript
+import type { MilkdownPlugin } from '@milkdown/ctx'
+
+export const gfm: MilkdownPlugin[]
+```
+
+---
+
+## Table
+
+Tables are represented by a hierarchy of specialised nodes.
+
+| Schema export | Node name | Description |
+| --- | --- | --- |
+| `tableSchema` | `table` | Root table node. Content: `table_header_row table_row+`. |
+| `tableHeaderRowSchema` | `table_header_row` | Header row. Content: `(table_header)*`. |
+| `tableRowSchema` | `table_row` | Body row. Content: `(table_cell)*`. |
+| `tableHeaderSchema` | `table_header` | A header cell. Supports `alignment` attribute. |
+| `tableCellSchema` | `table_cell` | A body cell. Supports `alignment` attribute. |
+
+Input rules and keymaps:
+
+- `insertTableInputRule` — triggers on `| col | col |` style input at the start of a block.
+- `tablePasteRule` — paste rule that converts pasted tables into the table schema.
+- `tableKeymap` — `Tab` moves to the next cell; `Shift-Tab` moves to the previous cell; `Mod-Enter` exits the table.
+
+### Table commands
+
+| Command | Description |
+| --- | --- |
+| `goToPrevTableCellCommand` | Move cursor to the previous cell. |
+| `goToNextTableCellCommand` | Move cursor to the next cell. |
+| `exitTable` | Exit the table and insert a new paragraph below. |
+| `insertTableCommand` | Insert a table. Accepts optional `{ row?, col? }` (defaults to 3×3). |
+| `moveRowCommand` | Move a row. Accepts `{ from, to, pos? }`. |
+| `moveColCommand` | Move a column. Accepts `{ from, to, pos? }`. |
+| `selectRowCommand` | Select a row. Accepts `{ index, pos? }`. |
+| `selectColCommand` | Select a column. Accepts `{ index, pos? }`. |
+| `selectTableCommand` | Select the entire table. |
+| `deleteSelectedCellsCommand` | Delete the selected row, column, or table depending on the current `CellSelection`. |
+| `addColBeforeCommand` | Insert a column before the current column. |
+| `addColAfterCommand` | Insert a column after the current column. |
+| `addRowBeforeCommand` | Insert a row before the current row, copying column alignment. |
+| `addRowAfterCommand` | Insert a row after the current row, copying column alignment. |
+| `setAlignCommand` | Set cell alignment. Accepts `'left' \| 'center' \| 'right'` (default: `'left'`). |
+
+### Table utility functions
+
+`getCellsInCol`, `getCellsInRow`, `getAllCellsInTable`, `selectCol`, `selectRow`, `selectTable` — low-level helpers used internally by the table commands.
+
+---
+
+## Task list
+
+The GFM preset extends the `list_item` schema from CommonMark with an optional `checked` attribute to support checkboxes.
+
+`extendListItemSchemaForTask` — extends `listItemSchema` to add `checked: boolean | null`. When `checked` is `null`, the item renders as a plain list item.
+
+`wrapInTaskListInputRule` — triggers on `[ ] ` or `[x] ` inside a list item to set the `checked` attribute.
+
+```typescript
+// Example markdown that creates task list items:
+// - [ ] Unchecked task
+// - [x] Checked task
+```
+
+---
+
+## Strikethrough
+
+`strikethroughAttr` — configures HTML attributes on `<del>` elements.
+
+`strikethroughSchema` — mark with the internal name `strike_through`. Parses `<del>` tags and `text-decoration: line-through` CSS.
+
+`toggleStrikethroughCommand` — toggles the strikethrough mark on the current selection.
+
+`strikethroughInputRule` — triggers on `~~text~~` or `~text~` syntax.
+
+`strikethroughKeymap` — registers `Mod-Alt-x` to toggle strikethrough.
+
+---
+
+## Footnote
+
+`footnoteDefinitionSchema` — node for a footnote definition block (`[^label]: content`).
+
+`footnoteReferenceSchema` — inline node for a footnote reference (`[^label]`).
+
+---
+
+## Configuration example
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { gfm, insertTableCommand } from '@milkdown/kit/preset/gfm'
+import { callCommand } from '@milkdown/kit/utils'
+
+const editor = await Editor.make()
+  .use(commonmark)
+  .use(gfm)
+  .create()
+
+// Insert a 2-column, 3-row table programmatically
+editor.action(callCommand(insertTableCommand.key, { row: 3, col: 2 }))
+```

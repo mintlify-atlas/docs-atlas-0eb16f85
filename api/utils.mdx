@@ -1,0 +1,585 @@
+---
+title: '@milkdown/utils'
+description: High-level composable helpers and action macros for building Milkdown plugins — $node, $mark, $command, $prose, $shortcut, $inputRule, $view, $ctx, $remark, and more.
+---
+
+`@milkdown/utils` exports two categories of utilities:
+
+- **Composables** — factory functions that return `MilkdownPlugin` instances, each covering one editor concern (nodes, marks, commands, prose plugins, shortcuts, input rules, views, slices, remark plugins)
+- **Macros** — pure action functions passed to `editor.action()` to read or mutate editor state
+
+---
+
+## Composables
+
+### $node
+
+```typescript
+function $node(id: string, schema: (ctx: Ctx) => NodeSchema): $Node
+
+type $Node = MilkdownPlugin & {
+  id: string
+  schema: NodeSchema
+  type: (ctx: Ctx) => NodeType
+}
+```
+
+Creates a plugin that registers a ProseMirror node type. The `schema` factory receives `Ctx` and must return a `NodeSchema` (a `NodeSpec` extended with `parseMarkdown` and `toMarkdown` specs).
+
+After the editor is created, use `myNode.type(ctx)` to retrieve the live `NodeType` from the schema.
+
+```typescript
+import { $node } from '@milkdown/utils'
+import { $NodeSchema } from '@milkdown/transformer'
+
+export const paragraphNode = $node('paragraph', () => ({
+  content: 'inline*',
+  group: 'block',
+  parseDOM: [{ tag: 'p' }],
+  toDOM: () => ['p', 0],
+  parseMarkdown: {
+    match: (node) => node.type === 'paragraph',
+    runner: (state, node, type) => {
+      state.openNode(type).next(node.children).closeNode()
+    },
+  },
+  toMarkdown: {
+    match: (node) => node.type.name === 'paragraph',
+    runner: (state, node) => {
+      state.openNode('paragraph').next(node.content).closeNode()
+    },
+  },
+}))
+```
+
+**Async variant:** `$nodeAsync(id, schema, timerName?)` — accepts a factory returning `Promise<NodeSchema>` and registers an additional timer.
+
+---
+
+### $mark
+
+```typescript
+function $mark(id: string, schema: (ctx: Ctx) => MarkSchema): $Mark
+
+type $Mark = MilkdownPlugin & {
+  id: string
+  schema: MarkSchema
+  type: (ctx: Ctx) => MarkType
+}
+```
+
+Creates a plugin that registers a ProseMirror mark type.
+
+```typescript
+import { $mark } from '@milkdown/utils'
+
+export const boldMark = $mark('strong', () => ({
+  parseDOM: [{ tag: 'strong' }, { tag: 'b' }],
+  toDOM: () => ['strong', 0],
+  parseMarkdown: {
+    match: (node) => node.type === 'strong',
+    runner: (state, node, type) => {
+      state.openMark(type).next(node.children).closeMark(type)
+    },
+  },
+  toMarkdown: {
+    match: (mark) => mark.type.name === 'strong',
+    runner: (state, mark) => {
+      state.withMark(mark, 'strong')
+    },
+  },
+}))
+```
+
+**Async variant:** `$markAsync(id, schema, timerName?)`
+
+---
+
+### $nodeSchema
+
+```typescript
+function $nodeSchema<T extends string>(
+  id: T,
+  schema: (ctx: Ctx) => NodeSchema
+): $NodeSchema<T>
+
+type $NodeSchema<T extends string> = [$Ctx<GetNodeSchema, T>, $Node] & {
+  id: string
+  type: (ctx: Ctx) => NodeType
+  node: $Node
+  ctx: $Ctx<GetNodeSchema, T>
+  key: SliceType<GetNodeSchema, T>
+  extendSchema: (handler: (prev: GetNodeSchema) => GetNodeSchema) => $NodeSchema<T>
+}
+```
+
+Composed helper that creates both a schema-holding slice (`ctx`) and a node plugin (`node`) together. The schema factory is stored in a slice so other plugins can override it via `extendSchema`.
+
+```typescript
+import { $nodeSchema } from '@milkdown/utils'
+
+export const paragraphSchema = $nodeSchema('paragraph', () => ({
+  content: 'inline*',
+  group: 'block',
+  // ... parseMarkdown, toMarkdown, parseDOM, toDOM
+}))
+
+// Use in editor
+editor.use(paragraphSchema)
+
+// Extend the schema from another plugin
+const extendedParagraph = paragraphSchema.extendSchema((prev) => (ctx) => ({
+  ...prev(ctx),
+  attrs: { class: { default: null } },
+}))
+```
+
+---
+
+### $markSchema
+
+```typescript
+function $markSchema<T extends string>(
+  id: T,
+  schema: (ctx: Ctx) => MarkSchema
+): $MarkSchema<T>
+
+type $MarkSchema<T extends string> = [$Ctx<GetMarkSchema, T>, $Mark] & {
+  id: string
+  type: (ctx: Ctx) => MarkType
+  mark: $Mark
+  ctx: $Ctx<GetMarkSchema, T>
+  key: SliceType<GetMarkSchema, T>
+  extendSchema: (handler: (prev: GetMarkSchema) => GetMarkSchema) => $MarkSchema<T>
+}
+```
+
+Same as `$nodeSchema` but for marks. Includes an `extendSchema` method for composable overrides.
+
+---
+
+### $nodeAttr / $markAttr
+
+```typescript
+function $nodeAttr(
+  name: string,
+  value?: (node: Node) => Record<string, any>
+): $NodeAttr
+
+function $markAttr(
+  name: string,
+  value?: (mark: Mark) => Record<string, any>
+): $MarkAttr
+```
+
+Creates a slice plugin that holds an attribute factory function for a node or mark. Use these to make node/mark attributes configurable from user plugins.
+
+```typescript
+import { $nodeAttr } from '@milkdown/utils'
+
+// Creates a slice named 'headingAttr'
+export const headingAttr = $nodeAttr('heading', () => ({}))
+
+// Override the attribute factory
+editor.config((ctx) => {
+  ctx.set(headingAttr.key, (node) => ({
+    'data-level': node.attrs.level,
+  }))
+})
+```
+
+---
+
+### $command
+
+```typescript
+function $command<T, K extends string>(
+  key: K,
+  cmd: (ctx: Ctx) => Cmd<T>
+): $Command<T>
+
+type $Command<T> = MilkdownPlugin & {
+  key: CmdKey<T>
+  run: (payload?: T) => boolean
+}
+```
+
+Registers a ProseMirror command with the `CommandManager`. The `cmd` factory receives `Ctx` and returns a function `(payload?: T) => Command`.
+
+- `$command.key` — the `CmdKey<T>` used with `callCommand` or `commandsCtx.call()`
+- `$command.run(payload?)` — convenience shorthand to run the command directly
+
+```typescript
+import { $command } from '@milkdown/utils'
+import { setBlockType } from '@milkdown/prose/commands'
+import { headingSchema } from './heading'
+
+export const setHeadingCommand = $command(
+  'SetHeading',
+  (ctx) => (level = 1) =>
+    setBlockType(headingSchema.type(ctx), { level })
+)
+
+// Later, in an action:
+editor.action((ctx) => {
+  ctx.get(commandsCtx).call(setHeadingCommand.key, 2)
+})
+```
+
+**Async variant:** `$commandAsync(key, cmd, timerName?)`
+
+---
+
+### $inputRule
+
+```typescript
+function $inputRule(inputRule: (ctx: Ctx) => InputRule): $InputRule
+
+type $InputRule = MilkdownPlugin & {
+  inputRule: InputRule
+}
+```
+
+Creates a plugin that registers a ProseMirror `InputRule`. The factory receives `Ctx` after `SchemaReady`.
+
+```typescript
+import { $inputRule } from '@milkdown/utils'
+import { wrappingInputRule } from '@milkdown/prose/inputrules'
+import { bulletListSchema } from './bullet-list'
+
+export const bulletListInputRule = $inputRule((ctx) =>
+  wrappingInputRule(/^\s*([-+*])\s$/, bulletListSchema.type(ctx))
+)
+```
+
+**Async variant:** `$inputRuleAsync(inputRule, timerName?)`
+
+---
+
+### $shortcut
+
+```typescript
+function $shortcut(shortcut: (ctx: Ctx) => Keymap): $Shortcut
+
+type Keymap = Record<string, Command | KeymapItem>
+
+type $Shortcut = MilkdownPlugin & {
+  keymap: Keymap
+}
+```
+
+Registers keyboard shortcuts with the `KeymapManager`. The `Keymap` value may be a plain ProseMirror `Command` function or a `KeymapItem` with `key`, `onRun`, and optional `priority`.
+
+```typescript
+import { $shortcut } from '@milkdown/utils'
+import { toggleMark } from '@milkdown/prose/commands'
+import { boldMark } from './bold'
+
+export const boldShortcut = $shortcut((ctx) => ({
+  'Mod-b': toggleMark(boldMark.type(ctx)),
+  'Mod-B': toggleMark(boldMark.type(ctx)),
+}))
+```
+
+**Async variant:** `$shortcutAsync(shortcut, timerName?)`
+
+---
+
+### $prose
+
+```typescript
+function $prose(prose: (ctx: Ctx) => Plugin): $Prose
+
+type $Prose = MilkdownPlugin & {
+  plugin: () => Plugin
+  key: () => PluginKey | undefined
+}
+```
+
+Wraps a ProseMirror `Plugin` as a Milkdown plugin. The factory runs after `SchemaReady`.
+
+```typescript
+import { $prose } from '@milkdown/utils'
+import { Plugin, PluginKey } from '@milkdown/prose/state'
+
+const key = new PluginKey('myPlugin')
+
+export const myProsePlugin = $prose(() =>
+  new Plugin({
+    key,
+    props: {
+      handleKeyDown: (_view, event) => {
+        if (event.key === 'Tab') {
+          // handle tab
+          return true
+        }
+        return false
+      },
+    },
+  })
+)
+```
+
+**Async variant:** `$proseAsync(prose, timerName?)`
+
+---
+
+### $view
+
+```typescript
+function $view<T extends $Node | $Mark, V extends NodeViewConstructor | MarkViewConstructor>(
+  type: T,
+  view: (ctx: Ctx) => V
+): $View<T, V>
+
+type $View<T, V> = MilkdownPlugin & {
+  view: V
+  type: T
+}
+```
+
+Attaches a ProseMirror node view or mark view to an existing `$Node` or `$Mark` plugin.
+
+```typescript
+import { $view } from '@milkdown/utils'
+import { paragraphNode } from './paragraph'
+
+export const paragraphView = $view(
+  paragraphNode,
+  (ctx) => (node, view, getPos) => {
+    const dom = document.createElement('p')
+    dom.dataset.id = node.attrs.id
+    return { dom }
+  }
+)
+```
+
+**Async variant:** `$viewAsync(type, view, timerName?)`
+
+---
+
+### $ctx
+
+```typescript
+function $ctx<T, N extends string>(value: T, name: N): $Ctx<T, N>
+
+type $Ctx<T, N extends string> = MilkdownPlugin & {
+  key: SliceType<T, N>
+}
+```
+
+Creates a plugin that injects a named slice into `Ctx`. Use this to expose configurable values from your plugin to other plugins or user configuration.
+
+```typescript
+import { $ctx } from '@milkdown/utils'
+
+export const maxLengthCtx = $ctx(1000, 'maxLength')
+
+// User config:
+editor.config((ctx) => {
+  ctx.set(maxLengthCtx.key, 500)
+})
+
+// Read in a plugin:
+const max = ctx.get(maxLengthCtx.key)
+```
+
+---
+
+### $remark
+
+```typescript
+function $remark<Id extends string, Options>(
+  id: Id,
+  remark: (ctx: Ctx) => RemarkPluginRaw<Options>,
+  initialOptions?: Options
+): $Remark<Id, Options>
+
+type $Remark<Id, Options> = [$Ctx<Options, Id>, MilkdownPlugin] & {
+  id: Id
+  plugin: MilkdownPlugin
+  options: $Ctx<Options, Id>
+}
+```
+
+Wraps a remark/unified plugin as a Milkdown plugin and exposes its options through a slice so users can override them in `.config()`.
+
+```typescript
+import { $remark } from '@milkdown/utils'
+import remarkGfm from 'remark-gfm'
+
+export const gfmPlugin = $remark('gfm', () => remarkGfm)
+
+// User config: override options
+editor.config((ctx) => {
+  ctx.set(gfmPlugin.options.key, { singleTilde: false })
+})
+```
+
+---
+
+## Macros
+
+Macros are functions that return `(ctx: Ctx) => T` and are designed to be passed to `editor.action()`.
+
+### getMarkdown
+
+```typescript
+function getMarkdown(range?: { from: number; to: number }): (ctx: Ctx) => string
+```
+
+Serializes the current document (or a range) to a markdown string.
+
+```typescript
+const md = editor.action(getMarkdown())
+
+// Get markdown for a range
+const partial = editor.action(getMarkdown({ from: 0, to: 50 }))
+```
+
+### getHTML
+
+```typescript
+function getHTML(): (ctx: Ctx) => string
+```
+
+Serializes the current document to an HTML string using ProseMirror's `DOMSerializer`.
+
+```typescript
+const html = editor.action(getHTML())
+```
+
+### insert
+
+```typescript
+function insert(markdown: string, inline?: boolean): (ctx: Ctx) => void
+```
+
+Inserts markdown at the current selection. When `inline` is `false` (default), replaces the selection with block-level content. When `true`, performs an inline insert.
+
+```typescript
+editor.action(insert('**bold text**', true))
+editor.action(insert('## New heading\n\n'))
+```
+
+### replaceAll
+
+```typescript
+function replaceAll(markdown: string, flush?: boolean): (ctx: Ctx) => void
+```
+
+Replaces the entire document content with new markdown. When `flush` is `true`, the `EditorState` is fully recreated (resetting undo history). When `false` (default), uses a transaction.
+
+```typescript
+editor.action(replaceAll('# Fresh start\n\nNew content here.'))
+```
+
+### callCommand
+
+```typescript
+function callCommand<T>(slice: CmdKey<T>, payload?: T): (ctx: Ctx) => boolean
+function callCommand<T extends CmdKey<any>>(slice: string, payload?: any): (ctx: Ctx) => boolean
+```
+
+Calls a registered command by its key or string name.
+
+```typescript
+import { callCommand } from '@milkdown/utils'
+import { setHeadingCommand } from './heading'
+
+// By typed key:
+editor.action(callCommand(setHeadingCommand.key, 2))
+
+// By string:
+editor.action(callCommand('SetHeading', 2))
+```
+
+### outline
+
+```typescript
+function outline(): (ctx: Ctx) => Array<{ text: string; level: number; id: string }>
+```
+
+Traverses the document and returns an array of heading nodes with their text content, level, and id attribute.
+
+```typescript
+const headings = editor.action(outline())
+// [{ text: 'Introduction', level: 1, id: 'abc' }, ...]
+```
+
+### forceUpdate
+
+```typescript
+function forceUpdate(): (ctx: Ctx) => void
+```
+
+Forces the editor view to re-render by dispatching an empty transaction.
+
+### setAttr
+
+```typescript
+function setAttr(pos: number, attr: string, value: any): (ctx: Ctx) => void
+```
+
+Sets an attribute on the node at the given document position.
+
+```typescript
+editor.action(setAttr(10, 'level', 2))
+```
+
+### insertPos
+
+```typescript
+function insertPos(pos: number, markdown: string): (ctx: Ctx) => void
+```
+
+Inserts markdown content at a specific document position.
+
+### replaceRange
+
+```typescript
+function replaceRange(from: number, to: number, markdown: string): (ctx: Ctx) => void
+```
+
+Replaces content between `from` and `to` with new markdown.
+
+### markdownToSlice
+
+```typescript
+function markdownToSlice(markdown: string): (ctx: Ctx) => Slice | undefined
+```
+
+Parses markdown to a ProseMirror `Slice` without inserting it into the editor. Useful for custom paste handling.
+
+---
+
+## Combining composables
+
+Composables are plain `MilkdownPlugin` values and can be combined with `editor.use()`:
+
+```typescript
+import { Editor, rootCtx, defaultValueCtx } from '@milkdown/core'
+import {
+  $node, $mark, $command, $shortcut, $inputRule, $prose
+} from '@milkdown/utils'
+import { getMarkdown, callCommand } from '@milkdown/utils'
+
+const myNode = $node('myNode', () => ({ /* schema */ }))
+const myMark = $mark('myMark', () => ({ /* schema */ }))
+const myCmd  = $command('MyCommand', (ctx) => () => () => true)
+const myKeys = $shortcut(() => ({ 'Mod-m': () => true }))
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.set(rootCtx, document.querySelector('#editor'))
+    ctx.set(defaultValueCtx, '# Hello')
+  })
+  .use([myNode, myMark, myCmd, myKeys])
+  .create()
+
+// Call the command
+editor.action(callCommand(myCmd.key))
+
+// Read markdown
+const md = editor.action(getMarkdown())
+```

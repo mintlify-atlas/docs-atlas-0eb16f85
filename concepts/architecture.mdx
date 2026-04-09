@@ -1,0 +1,146 @@
+---
+title: 'Architecture'
+description: 'How the Core, Transformer, and Ctx layers fit together in a Milkdown editor instance.'
+---
+
+Milkdown is structured around three cooperating layers: a **ProseMirror core** that owns the document model and view, a **Transformer layer** that converts between markdown text and the ProseMirror document, and a **Ctx layer** that wires every other piece together through a typed, plugin-driven context system.
+
+## The three layers
+
+<CardGroup cols={3}>
+  <Card title="Core (ProseMirror)" icon="cube">
+    Provides the schema, editor state, editor view, commands, keymaps, and input/paste rules. Every capability is registered into the shared context so plugins can read and extend it.
+  </Card>
+  <Card title="Transformer (remark/unified)" icon="arrows-left-right">
+    Converts a markdown string into a remark AST with `remark-parse`, then maps AST nodes to ProseMirror nodes and marks. The reverse path maps ProseMirror nodes back to a remark AST and serializes with `remark-stringify`.
+  </Card>
+  <Card title="Ctx (plugin context)" icon="plug">
+    A container of typed slices (key-value stores) and timers. Every plugin receives a `Ctx` instance, registers its own slices, and signals readiness through timers. Other plugins wait on those timers before proceeding.
+  </Card>
+</CardGroup>
+
+## Data flow
+
+When Milkdown renders a markdown document:
+
+```
+Markdown string
+      │
+      ▼  remark-parse
+  Remark AST
+      │
+      ▼  ParserState (Transformer layer)
+ProseMirror Node (doc)
+      │
+      ▼  EditorState.create
+ EditorState
+      │
+      ▼  EditorView
+  DOM / View
+```
+
+The reverse happens when serializing: `SerializerState` walks the ProseMirror document and produces a remark AST, which `remark-stringify` turns back into a markdown string.
+
+## The schema layer
+
+The schema layer is established first. The `schema` internal plugin collects every `[id, NodeSchema]` pair from `nodesCtx` and every `[id, MarkSchema]` pair from `marksCtx`, then builds a single ProseMirror `Schema` object:
+
+```typescript
+// packages/core/src/internal-plugin/schema.ts
+export const nodesCtx = createSlice([] as Array<[string, NodeSchema]>, 'nodes')
+export const marksCtx = createSlice([] as Array<[string, MarkSchema]>, 'marks')
+export const schemaCtx = createSlice({} as Schema, 'schema')
+```
+
+Plugins extend the schema layer by pushing entries into `nodesCtx` or `marksCtx` during their setup phase (before `SchemaReady` is resolved).
+
+## The parser/serializer layer
+
+Once `SchemaReady` fires, the `parser` and `serializer` internal plugins run in parallel. Each reads the shared remark processor from `remarkCtx` and the schema from `schemaCtx`, then creates a `ParserState` or `SerializerState` respectively.
+
+```typescript
+// parser plugin — simplified
+return async () => {
+  await ctx.waitTimers(parserTimerCtx) // waits for SchemaReady
+  const remark = ctx.get(remarkCtx)
+  const schema = ctx.get(schemaCtx)
+  ctx.set(parserCtx, ParserState.create(schema, remark))
+  ctx.done(ParserReady)
+}
+```
+
+Plugins add remark plugins to `remarkPluginsCtx` before `SchemaReady` to influence how AST nodes are parsed or serialized.
+
+## The view layer
+
+The view layer starts after `EditorStateReady` is resolved. The `editorView` internal plugin reads `editorStateCtx` and `nodeViewCtx`/`markViewCtx` slices, then mounts a ProseMirror `EditorView` into the element identified by `rootCtx`:
+
+```typescript
+export const rootCtx = createSlice(null as RootType, 'root')
+export const nodeViewCtx = createSlice([] as NodeView[], 'nodeView')
+export const markViewCtx = createSlice([] as MarkView[], 'markView')
+```
+
+Plugins register custom node or mark views by pushing into `nodeViewCtx` or `markViewCtx`.
+
+## The plugin lifecycle
+
+Every Milkdown plugin goes through three distinct phases:
+
+<Steps>
+  <Step title="Creation (setup)">
+    The plugin function `(ctx: Ctx) => CtxRunner` is called immediately when `Editor.use()` or `Editor.create()` runs. At this point the plugin should call `ctx.inject()` to register its slices and `ctx.record()` to declare its timer. No async work should happen here.
+  </Step>
+  <Step title="Registration (run)">
+    After all plugins are created, Milkdown calls each plugin's `CtxRunner` (`() => RunnerReturnType`). Plugins use `ctx.wait()` or `ctx.waitTimers()` to block until their dependencies are ready, then perform their main work (building a schema, creating a parser, mounting a view, etc.). When done, the plugin calls `ctx.done(MyTimer)` to signal readiness.
+  </Step>
+  <Step title="Cleanup">
+    When the editor is destroyed, each runner's returned cleanup function is called. The plugin should call `ctx.remove()` to deregister its slices and `ctx.clearTimer()` to remove its timer.
+  </Step>
+</Steps>
+
+## Internal plugin initialization order
+
+The internal plugins run in a strict dependency chain enforced by timers:
+
+```
+ConfigReady
+    └─► InitReady
+            └─► SchemaReady
+                    ├─► ParserReady
+                    ├─► SerializerReady
+                    ├─► CommandsReady
+                    └─► KeymapReady
+                              └─► EditorStateReady
+                                        └─► EditorViewReady
+```
+
+User plugins may wait on any of these timers to run after a specific phase completes.
+
+## EditorStatus lifecycle
+
+The `Editor` class exposes a `status` property that reflects where the editor is in its lifecycle:
+
+| Status | Description |
+|--------|-------------|
+| `Idle` | Initial state — `Editor.make()` has been called but `create()` has not. |
+| `OnCreate` | `editor.create()` has been called; plugins are running. |
+| `Created` | All plugins have finished; the editor is mounted and ready. |
+| `OnDestroy` | `editor.destroy()` has been called; cleanup functions are running. |
+| `Destroyed` | All cleanup has completed. |
+
+Subscribe to status changes with `editor.onStatusChange()`:
+
+```typescript
+import { Editor, EditorStatus } from '@milkdown/core'
+
+const editor = Editor.make()
+  .onStatusChange((status) => {
+    if (status === EditorStatus.Created) {
+      console.log('Editor is ready')
+    }
+  })
+  .use(/* plugins */)
+
+await editor.create()
+```

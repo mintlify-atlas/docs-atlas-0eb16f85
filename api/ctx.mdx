@@ -1,0 +1,410 @@
+---
+title: '@milkdown/ctx'
+description: The dependency-injection backbone of Milkdown — provides Ctx, slices (createSlice), timers (createTimer), and the MilkdownPlugin type.
+---
+
+`@milkdown/ctx` implements the dependency-injection system that every Milkdown plugin runs inside. It has three primitives:
+
+- **Slices** — typed, named values stored in a `Container`
+- **Timers** — named async barriers stored in a `Clock`
+- **`Ctx`** — the object passed to every plugin; wraps both and provides the full plugin API
+
+---
+
+## Ctx class
+
+`Ctx` is the central object passed to every `MilkdownPlugin` during setup and available inside `.action()` callbacks.
+
+```typescript
+class Ctx {
+  constructor(container: Container, clock: Clock, meta?: Meta)
+}
+```
+
+### Slice methods
+
+#### `.inject(sliceType, value?)`
+
+```typescript
+inject<T>(sliceType: SliceType<T>, value?: T): Ctx
+```
+
+Registers a slice in the container, optionally setting its initial value. This is how plugins declare the slices they own. Returns `this` for chaining.
+
+```typescript
+ctx.inject(mySlice, 'initial value')
+```
+
+#### `.remove(sliceType)`
+
+```typescript
+remove<T, N extends string>(sliceType: SliceType<T, N> | N): Ctx
+```
+
+Removes a slice from the container. Used in plugin cleanup functions.
+
+#### `.get(sliceType)`
+
+```typescript
+get<T, N extends string>(sliceType: SliceType<T, N> | N): T
+```
+
+Reads the current value of a slice.
+
+```typescript
+const view = ctx.get(editorViewCtx)
+```
+
+#### `.set(sliceType, value)`
+
+```typescript
+set<T, N extends string>(sliceType: SliceType<T, N> | N, value: T): void
+```
+
+Sets the value of a slice and notifies any watchers.
+
+```typescript
+ctx.set(defaultValueCtx, '# New content')
+```
+
+#### `.update(sliceType, updater)`
+
+```typescript
+update<T, N extends string>(
+  sliceType: SliceType<T, N> | N,
+  updater: (prev: T) => T
+): void
+```
+
+Updates a slice value using a callback that receives the current value.
+
+```typescript
+ctx.update(prosePluginsCtx, (plugins) => [...plugins, myPlugin])
+```
+
+#### `.use(sliceType)`
+
+```typescript
+use<T, N extends string>(sliceType: SliceType<T, N> | N): Slice<T, N>
+```
+
+Returns the raw `Slice` object, giving access to `.on()`, `.once()`, and `.off()` watchers in addition to `.get()` and `.set()`.
+
+#### `.isInjected(sliceType)`
+
+```typescript
+isInjected<T, N extends string>(sliceType: SliceType<T, N> | N): boolean
+```
+
+Returns `true` if the slice has been injected into the container.
+
+### Timer methods
+
+#### `.record(timerType)`
+
+```typescript
+record(timerType: TimerType): Ctx
+```
+
+Creates a new `Timer` in the clock from the given `TimerType`. Plugins call this in their setup phase to declare timers they will resolve.
+
+```typescript
+const MyReady = createTimer('MyReady')
+ctx.record(MyReady)
+```
+
+#### `.done(timerType)`
+
+```typescript
+done(timerType: TimerType): void
+```
+
+Marks a timer as resolved, unblocking anything that is `await`-ing it with `.wait()`.
+
+```typescript
+ctx.done(MyReady)
+```
+
+#### `.wait(timerType)`
+
+```typescript
+wait(timerType: TimerType): Promise<void>
+```
+
+Returns a `Promise` that resolves when the given timer is marked done. Rejects after the timer's configured timeout (default 3 seconds).
+
+```typescript
+await ctx.wait(SchemaReady)
+```
+
+#### `.waitTimers(slice)`
+
+```typescript
+waitTimers(slice: SliceType<TimerType[]>): Promise<void>
+```
+
+Convenience method: reads a `TimerType[]` slice and awaits all timers in parallel.
+
+```typescript
+await ctx.waitTimers(myTimerListCtx)
+// equivalent to:
+await Promise.all(ctx.get(myTimerListCtx).map((t) => ctx.wait(t)))
+```
+
+#### `.clearTimer(timerType)`
+
+```typescript
+clearTimer(timerType: TimerType): Ctx
+```
+
+Removes a timer from the clock. Used in cleanup functions.
+
+#### `.isRecorded(timerType)`
+
+```typescript
+isRecorded(timerType: TimerType): boolean
+```
+
+Returns `true` if the timer has been created in the clock.
+
+### Inspector
+
+#### `.produce(meta?)`
+
+```typescript
+produce(meta?: Meta): Ctx
+```
+
+Creates a child `Ctx` linked to the same container and clock, but with different plugin metadata attached. Used internally by `Editor` to scope telemetry per plugin. If `meta` is empty or omitted, returns `this`.
+
+#### `.meta` / `.inspector`
+
+```typescript
+get meta(): Meta | undefined
+get inspector(): Inspector | undefined
+```
+
+Accessors for the plugin metadata and inspector attached to this `Ctx`. Both are `undefined` unless `.enableInspector()` was called before `.create()`.
+
+---
+
+## createSlice
+
+```typescript
+function createSlice<T, N extends string>(value: T, name: N): SliceType<T, N>
+```
+
+Creates a named, typed slice type. The name must be unique across all slices used in an editor instance.
+
+```typescript
+import { createSlice } from '@milkdown/ctx'
+
+const counterCtx = createSlice(0, 'counter')
+```
+
+### SliceType class
+
+```typescript
+class SliceType<T, N extends string> {
+  readonly id: symbol
+  readonly name: N
+  readonly _defaultValue: T
+
+  create(container: SliceMap, value?: T): Slice<T, N>
+}
+```
+
+`SliceType` is the static definition; `Slice` is the live instance stored in a container.
+
+### Slice class
+
+```typescript
+class Slice<T, N extends string> {
+  readonly type: SliceType<T, N>
+
+  get(): T
+  set(value: T): void
+  update(updater: (prev: T) => T): void
+
+  on(watcher: (value: T) => unknown): () => void   // Returns unsubscribe fn
+  once(watcher: (value: T) => unknown): () => void
+  off(watcher: (value: T) => unknown): void
+  offAll(): void
+}
+```
+
+You rarely need to interact with `Slice` directly — use the `Ctx` methods instead.
+
+---
+
+## createTimer
+
+```typescript
+function createTimer(name: string, timeout?: number): TimerType
+```
+
+Creates a named timer type. The `timeout` defaults to 3000 ms; if the timer is not resolved within that window, awaiting it rejects.
+
+```typescript
+import { createTimer } from '@milkdown/ctx'
+
+const MyPluginReady = createTimer('MyPluginReady')
+```
+
+### TimerType class
+
+```typescript
+class TimerType {
+  readonly id: symbol
+  readonly name: string
+  readonly timeout: number
+
+  create(clock: TimerMap): Timer
+}
+```
+
+### Timer class
+
+```typescript
+class Timer {
+  readonly type: TimerType
+
+  get status(): 'pending' | 'resolved' | 'rejected'
+
+  start(): Promise<void>  // Returns (or creates) the promise
+  done(): void            // Resolves the promise via CustomEvent
+}
+```
+
+---
+
+## MilkdownPlugin type
+
+```typescript
+type MilkdownPlugin = { meta?: Meta } & ((ctx: Ctx) => CtxRunner)
+
+type CtxRunner = () => void | Promise<void> | Cleanup | Promise<Cleanup>
+
+type Cleanup = () => void | Promise<void>
+```
+
+A plugin is a function that receives a `Ctx` during setup and returns a `CtxRunner` that fires when the editor boots. The runner may return a cleanup function that fires on `destroy()`.
+
+```typescript
+// Full plugin lifecycle
+const myPlugin: MilkdownPlugin = (ctx) => {
+  // Setup: inject slices, record timers
+  ctx.inject(mySlice, defaultValue).record(MyReady)
+
+  return async () => {
+    // Run: wait for dependencies, do work, resolve own timer
+    await ctx.wait(SchemaReady)
+    ctx.set(mySlice, computedValue)
+    ctx.done(MyReady)
+
+    return () => {
+      // Cleanup: remove slices, clear timers
+      ctx.remove(mySlice).clearTimer(MyReady)
+    }
+  }
+}
+```
+
+---
+
+## Container class
+
+`Container` is the low-level store for slices. You do not typically use it directly; `Ctx` wraps it.
+
+```typescript
+class Container {
+  sliceMap: SliceMap  // Map<symbol, Slice>
+
+  get<T, N extends string>(slice: SliceType<T, N> | N): Slice<T, N>
+  remove<T, N extends string>(slice: SliceType<T, N> | N): void
+  has<T, N extends string>(slice: SliceType<T, N> | N): boolean
+}
+```
+
+---
+
+## Clock class
+
+`Clock` is the low-level store for timers. You do not typically use it directly; `Ctx` wraps it.
+
+```typescript
+class Clock {
+  store: TimerMap  // Map<symbol, Timer>
+
+  get(timer: TimerType): Timer
+  remove(timer: TimerType): void
+  has(timer: TimerType): boolean
+}
+```
+
+---
+
+## Inspector and Telemetry
+
+When `editor.enableInspector()` is called, each plugin gets a scoped `Inspector` that records usage.
+
+### Telemetry interface
+
+```typescript
+interface Telemetry {
+  metadata: Meta
+  injectedSlices:  { name: string; value: unknown }[]
+  consumedSlices:  { name: string; value: unknown }[]
+  recordedTimers:  { name: string; duration: number; status: TimerStatus }[]
+  waitTimers:      { name: string; duration: number; status: TimerStatus }[]
+}
+
+type TimerStatus = 'pending' | 'resolved' | 'rejected'
+```
+
+### Meta interface
+
+```typescript
+interface Meta {
+  displayName: string
+  description?: string
+  package: string
+  group?: string
+  additional?: Record<string, any>
+}
+```
+
+---
+
+## Full plugin example
+
+```typescript
+import { createSlice, createTimer, type MilkdownPlugin } from '@milkdown/ctx'
+import { SchemaReady } from '@milkdown/core'
+
+// 1. Declare the slice and timer outside the plugin
+const myDataCtx = createSlice<string[]>([], 'myData')
+const MyPluginReady = createTimer('MyPluginReady')
+
+// 2. Define the plugin
+export const myPlugin: MilkdownPlugin = (ctx) => {
+  // Setup phase — runs synchronously when the editor loads plugins
+  ctx.inject(myDataCtx, []).record(MyPluginReady)
+
+  // Runner — called after setup, awaits dependencies
+  return async () => {
+    await ctx.wait(SchemaReady)
+
+    ctx.update(myDataCtx, (prev) => [...prev, 'item'])
+    ctx.done(MyPluginReady)
+
+    // Cleanup — called on editor.destroy()
+    return () => {
+      ctx.remove(myDataCtx).clearTimer(MyPluginReady)
+    }
+  }
+}
+
+// 3. Use the slice in an action
+const items = editor.action((ctx) => ctx.get(myDataCtx))
+```

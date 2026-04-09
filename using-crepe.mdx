@@ -1,0 +1,235 @@
+---
+title: Using Crepe
+description: Get a fully-featured WYSIWYG markdown editor running in minutes with @milkdown/crepe.
+---
+
+Crepe is the high-level, opinionated editor built on top of Milkdown. It bundles all popular features — code blocks with syntax highlighting, image management, tables, math, slash commands, a formatting toolbar, and more — with sensible defaults, so you can get a rich editor running without assembling plugins manually.
+
+<Tip>
+  Crepe is the fastest way to add a capable markdown editor to your application. If you need fine-grained control over which plugins load, use `@milkdown/kit` directly and follow the [Quickstart](/quickstart) guide.
+</Tip>
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/crepe
+```
+
+```bash yarn
+yarn add @milkdown/crepe
+```
+
+```bash pnpm
+pnpm add @milkdown/crepe
+```
+
+</CodeGroup>
+
+## Import styles
+
+Crepe ships several themes as standalone CSS files. Import one before creating the editor:
+
+<CodeGroup>
+
+```typescript Classic theme
+import '@milkdown/crepe/theme/classic.css'
+```
+
+```typescript Classic dark theme
+import '@milkdown/crepe/theme/classic-dark.css'
+```
+
+```typescript Nord theme
+import '@milkdown/crepe/theme/nord.css'
+```
+
+```typescript Nord dark theme
+import '@milkdown/crepe/theme/nord-dark.css'
+```
+
+```typescript Frame theme
+import '@milkdown/crepe/theme/frame.css'
+```
+
+```typescript Frame dark theme
+import '@milkdown/crepe/theme/frame-dark.css'
+```
+
+</CodeGroup>
+
+## Create an editor
+
+Pass a `root` element and an optional `defaultValue` to the `Crepe` constructor, then call `.create()`:
+
+```typescript
+import { Crepe } from '@milkdown/crepe'
+import '@milkdown/crepe/theme/classic.css'
+
+const crepe = new Crepe({
+  root: document.getElementById('editor'),
+  defaultValue: '# Hello Crepe\n\nStart editing here.',
+})
+
+await crepe.create()
+```
+
+`root` accepts a DOM node or a CSS selector string. If omitted, Crepe appends the editor to `document.body`.
+
+## Available features
+
+Crepe features are identified by the `CrepeFeature` enum (also aliased as `Crepe.Feature`). The following features are available:
+
+| Feature | Description | Enabled by default |
+|---|---|---|
+| `CodeMirror` | Syntax-highlighted, editable code blocks with language support. | Yes |
+| `ListItem` | Bullet lists, ordered lists, and todo lists. | Yes |
+| `LinkTooltip` | Hover tooltip for links with edit, remove, and copy actions. | Yes |
+| `Cursor` | Drop cursor and gap cursor for better content placement. | Yes |
+| `ImageBlock` | Image upload and management with resizing and captions. | Yes |
+| `BlockEdit` | Drag-and-drop block management and slash commands. | Yes |
+| `Toolbar` | Floating formatting toolbar for selected text. | Yes |
+| `Placeholder` | Document and block-level placeholder text when content is empty. | Yes |
+| `Table` | Full-featured table editing with row/column management and alignment. | Yes |
+| `Latex` | Inline and block math rendering using KaTeX. | Yes |
+| `TopBar` | Fixed top toolbar with heading selector, formatting, and insert actions. | No |
+| `Diff` | Diff review mode for comparing and accepting/rejecting changes. | No |
+| `Streaming` | Progressive markdown rendering for AI-generated content. | No |
+
+## Enable and disable features
+
+Pass a `features` map to the constructor to override the defaults. Set a feature to `false` to disable it, or `true` to enable one that is off by default:
+
+```typescript
+import { Crepe } from '@milkdown/crepe'
+import '@milkdown/crepe/theme/classic.css'
+
+const crepe = new Crepe({
+  root: document.getElementById('editor'),
+  features: {
+    // Disable features you don't need
+    [Crepe.Feature.Latex]: false,
+    [Crepe.Feature.Diff]: false,
+    // Enable features that are off by default
+    [Crepe.Feature.TopBar]: true,
+    [Crepe.Feature.Streaming]: true,
+  },
+})
+
+await crepe.create()
+```
+
+Only the features listed in `features` are overridden — all others keep their defaults.
+
+## Configure individual features
+
+Use `featureConfigs` to pass configuration to specific features:
+
+```typescript
+import { Crepe } from '@milkdown/crepe'
+import '@milkdown/crepe/theme/classic.css'
+
+const crepe = new Crepe({
+  root: document.getElementById('editor'),
+  featureConfigs: {
+    [Crepe.Feature.Placeholder]: {
+      text: 'Start writing...',
+    },
+    [Crepe.Feature.ImageBlock]: {
+      onUpload: async (file) => {
+        // Upload the file and return a URL
+        const url = await uploadToStorage(file)
+        return url
+      },
+    },
+  },
+})
+
+await crepe.create()
+```
+
+## Get and set content
+
+### Get markdown
+
+Call `getMarkdown()` at any time after the editor is created:
+
+```typescript
+const markdown = crepe.getMarkdown()
+```
+
+### Listen to changes
+
+Use `on()` to register listeners before or after creation:
+
+```typescript
+crepe.on((listener) => {
+  listener.markdownUpdated((_ctx, markdown, prevMarkdown) => {
+    console.log('Content changed:', markdown)
+  })
+})
+
+await crepe.create()
+```
+
+The listener API is the same as the one used in `@milkdown/plugin-listener`. You can also listen to `mounted`, `blur`, `focus`, `destroy`, and `selectionUpdated` events.
+
+## Read-only mode
+
+```typescript
+crepe.setReadonly(true)
+```
+
+Call `setReadonly(false)` to re-enable editing.
+
+## Destroy the editor
+
+```typescript
+await crepe.destroy()
+```
+
+## Complete example
+
+```typescript
+import { Crepe } from '@milkdown/crepe'
+import '@milkdown/crepe/theme/classic.css'
+
+const crepe = new Crepe({
+  root: document.getElementById('editor'),
+  defaultValue: '# Hello Crepe',
+  features: {
+    [Crepe.Feature.TopBar]: true,
+    [Crepe.Feature.Latex]: false,
+  },
+  featureConfigs: {
+    [Crepe.Feature.Placeholder]: {
+      text: 'Type / to insert a block...',
+    },
+  },
+})
+
+crepe.on((listener) => {
+  listener.markdownUpdated((_ctx, markdown) => {
+    console.log(markdown)
+  })
+})
+
+await crepe.create()
+
+// Read content later
+document.getElementById('save')?.addEventListener('click', () => {
+  console.log(crepe.getMarkdown())
+})
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="terminal" href="/quickstart">
+    Build a minimal editor with full control using `@milkdown/kit`.
+  </Card>
+  <Card title="Plugins and presets" icon="puzzle-piece" href="/plugins/presets">
+    Learn about the plugins Crepe uses internally and how to extend them.
+  </Card>
+</CardGroup>

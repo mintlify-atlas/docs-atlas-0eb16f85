@@ -1,0 +1,295 @@
+---
+title: "Vue"
+description: "Integrate Milkdown into a Vue 3 application using MilkdownProvider, useEditor, and the Milkdown component."
+---
+
+The `@milkdown/vue` package provides Vue 3 equivalents of the React integration: a provider component, a composable for registering the editor factory, and a component that renders the editor view. All APIs use the Vue Composition API.
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/vue @milkdown/kit
+```
+
+```bash yarn
+yarn add @milkdown/vue @milkdown/kit
+```
+
+```bash pnpm
+pnpm add @milkdown/vue @milkdown/kit
+```
+
+</CodeGroup>
+
+`@milkdown/kit` is a meta-package that re-exports the Milkdown core, presets, plugins, and utilities under sub-paths such as `@milkdown/kit/core`, `@milkdown/kit/preset/commonmark`, and `@milkdown/kit/plugin/listener`.
+
+## Core API
+
+The Vue integration exports four things from `@milkdown/vue`:
+
+| Export | Type | Description |
+| --- | --- | --- |
+| `MilkdownProvider` | Component | Context provider — wrap your app or page with this |
+| `Milkdown` | Component | Renders the editor DOM node |
+| `useEditor` | Composable | Registers the editor factory and returns loading state |
+| `useInstance` | Composable | Accesses the live `Editor` instance after creation |
+
+### MilkdownProvider
+
+`MilkdownProvider` uses Vue's `provide` / `inject` to share editor state with descendant components. Wrap your editor subtree with it.
+
+```vue
+<script setup lang="ts">
+import { MilkdownProvider } from '@milkdown/vue'
+</script>
+
+<template>
+  <MilkdownProvider>
+    <YourEditor />
+  </MilkdownProvider>
+</template>
+```
+
+### useEditor
+
+`useEditor` registers the factory function that creates and configures the `Editor` instance. Call it inside the `setup` function of a component that is a descendant of `MilkdownProvider`.
+
+```typescript
+function useEditor(getEditor: GetEditor): UseEditorReturn
+```
+
+```typescript
+// GetEditor — the factory function signature
+type GetEditor = (container: HTMLDivElement) => Editor | Crepe
+```
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `loading` | `Ref<boolean>` | `true` while the editor is being created |
+| `get` | `() => Editor \| undefined` | Returns the editor instance once ready |
+
+### Milkdown
+
+`Milkdown` renders a `<div data-milkdown-root>` and passes it to the editor view. Place it inside your editor component's template.
+
+```vue
+<template>
+  <Milkdown />
+</template>
+```
+
+### useInstance
+
+`useInstance` returns a tuple of the current loading state and a getter for the `Editor` instance.
+
+```typescript
+function useInstance(): [Ref<boolean>, () => Editor | undefined]
+```
+
+When `loading.value` is `true`, the getter returns `undefined`. Check `loading.value` before calling `editor.action(...)`.
+
+## Getting markdown content
+
+Use `plugin-listener` from `@milkdown/kit/plugin/listener` to subscribe to document changes.
+
+```vue
+<script setup lang="ts">
+import { defaultValueCtx, Editor, rootCtx } from '@milkdown/kit/core'
+import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/vue'
+import { ref } from 'vue'
+
+const markdown = ref('# Hello, Milkdown!')
+
+useEditor((root) =>
+  Editor.make()
+    .config((ctx) => {
+      ctx.set(rootCtx, root)
+      ctx.set(defaultValueCtx, markdown.value)
+      ctx.get(listenerCtx).markdownUpdated((_, value) => {
+        markdown.value = value
+      })
+    })
+    .use(commonmark)
+    .use(listener)
+)
+</script>
+
+<template>
+  <MilkdownProvider>
+    <Milkdown />
+  </MilkdownProvider>
+  <pre>{{ markdown }}</pre>
+</template>
+```
+
+<Note>
+`listenerCtx` is a slice — retrieve it with `ctx.get(listenerCtx)` inside a `config` callback, then chain listener methods on the returned `ListenerManager`.
+</Note>
+
+## Setting markdown content
+
+To replace editor content programmatically after creation, use `editor.action` with the `replaceAll` utility.
+
+```vue
+<script setup lang="ts">
+import { replaceAll } from '@milkdown/kit/utils'
+import { useInstance } from '@milkdown/vue'
+
+const [loading, getInstance] = useInstance()
+
+function handleReset() {
+  if (loading.value) return
+  getInstance()?.action(replaceAll('# Reset\n\nContent replaced.'))
+}
+</script>
+
+<template>
+  <button :disabled="loading" @click="handleReset">Reset</button>
+</template>
+```
+
+`replaceAll` is imported from `@milkdown/kit/utils` and returns an action thunk that is passed directly to `editor.action`.
+
+## Full example
+
+The following example is a complete Vue single-file component that configures the editor, listens for content changes, and provides a reset button.
+
+```vue
+<script setup lang="ts">
+import { defaultValueCtx, Editor, rootCtx } from '@milkdown/kit/core'
+import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { replaceAll } from '@milkdown/kit/utils'
+import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/vue'
+import { ref } from 'vue'
+
+const INITIAL_VALUE = '# Hello, Milkdown!\n\nStart typing…'
+
+const markdown = ref(INITIAL_VALUE)
+
+useEditor((root) =>
+  Editor.make()
+    .config((ctx) => {
+      ctx.set(rootCtx, root)
+      ctx.set(defaultValueCtx, INITIAL_VALUE)
+      ctx.get(listenerCtx).markdownUpdated((_, value) => {
+        markdown.value = value
+      })
+    })
+    .use(commonmark)
+    .use(listener)
+)
+
+const [loading, getInstance] = useInstance()
+
+function handleReset() {
+  if (loading.value) return
+  getInstance()?.action(replaceAll(INITIAL_VALUE))
+}
+</script>
+
+<template>
+  <MilkdownProvider>
+    <Milkdown />
+  </MilkdownProvider>
+
+  <button :disabled="loading" @click="handleReset">Reset</button>
+  <pre>{{ markdown }}</pre>
+</template>
+```
+
+<Note>
+`useEditor` and `useInstance` must be called inside a component that is a descendant of `MilkdownProvider`. In the example above, the `setup` function runs in the context of the component that renders `<MilkdownProvider>`, so both composables have access to the injected context.
+
+If you split the editor into a separate child component, call `useEditor` and `useInstance` there instead.
+</Note>
+
+## Splitting into child components
+
+For larger apps, keep the editor configuration and the toolbar in separate components. Both must be children of `MilkdownProvider`.
+
+```vue
+<!-- EditorComponent.vue -->
+<script setup lang="ts">
+import { defaultValueCtx, Editor, rootCtx } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { Milkdown, useEditor } from '@milkdown/vue'
+
+const props = defineProps<{ initialValue: string }>()
+
+useEditor((root) =>
+  Editor.make()
+    .config((ctx) => {
+      ctx.set(rootCtx, root)
+      ctx.set(defaultValueCtx, props.initialValue)
+    })
+    .use(commonmark)
+)
+</script>
+
+<template>
+  <Milkdown />
+</template>
+```
+
+```vue
+<!-- Toolbar.vue -->
+<script setup lang="ts">
+import { replaceAll } from '@milkdown/kit/utils'
+import { useInstance } from '@milkdown/vue'
+
+const [loading, getInstance] = useInstance()
+
+function handleReset() {
+  if (loading.value) return
+  getInstance()?.action(replaceAll(''))
+}
+</script>
+
+<template>
+  <button :disabled="loading" @click="handleReset">Clear</button>
+</template>
+```
+
+```vue
+<!-- App.vue -->
+<script setup lang="ts">
+import { MilkdownProvider } from '@milkdown/vue'
+import EditorComponent from './EditorComponent.vue'
+import Toolbar from './Toolbar.vue'
+</script>
+
+<template>
+  <MilkdownProvider>
+    <Toolbar />
+    <EditorComponent initial-value="# Hello!" />
+  </MilkdownProvider>
+</template>
+```
+
+## TypeScript types
+
+All types are exported from `@milkdown/vue`:
+
+```typescript
+import type { GetEditor, UseEditorReturn, EditorInfoCtx } from '@milkdown/vue'
+import type { Ref } from 'vue'
+
+// GetEditor — the factory function signature
+type GetEditor = (container: HTMLDivElement) => Editor | Crepe
+
+// UseEditorReturn — returned by useEditor
+interface UseEditorReturn {
+  loading: Ref<boolean>
+  get: () => Editor | undefined
+}
+
+// Instance — tuple returned by useInstance
+type Instance = [Ref<true>, () => undefined] | [Ref<false>, () => Editor]
+```
+
+`Editor` is exported from `@milkdown/kit/core`.

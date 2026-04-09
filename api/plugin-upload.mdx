@@ -1,0 +1,190 @@
+---
+title: plugin-upload
+description: Handle file uploads via drag-and-drop or paste in Milkdown, with a configurable uploader function.
+---
+
+The `@milkdown/plugin-upload` package intercepts file drop and paste events and passes them through a configurable `uploader` function. The uploader returns ProseMirror nodes that are inserted at the drop or paste position. While an upload is in progress, a placeholder widget is shown in the editor.
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/plugin-upload
+```
+
+```bash yarn
+yarn add @milkdown/plugin-upload
+```
+
+```bash pnpm
+pnpm add @milkdown/plugin-upload
+```
+
+</CodeGroup>
+
+## Usage
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { upload } from '@milkdown/kit/plugin/upload'
+
+Editor.make().use(commonmark).use(upload).create()
+```
+
+By default, image files are converted to base64 data URLs and inserted as image nodes. Other file types are ignored. See [Custom uploader](#custom-uploader) to change this behaviour.
+
+### `upload`
+
+An array of `MilkdownPlugin` values that registers the upload configuration slice and the ProseMirror plugin.
+
+```typescript
+import type { MilkdownPlugin } from '@milkdown/ctx'
+
+export const upload: MilkdownPlugin[]
+```
+
+---
+
+## `uploadConfig`
+
+A `$ctx` slice that holds the active `UploadOptions` configuration.
+
+```typescript
+export const uploadConfig: $Ctx<UploadOptions, 'uploadConfig'>
+```
+
+Update options inside `.config()`:
+
+```typescript
+import { upload, uploadConfig } from '@milkdown/kit/plugin/upload'
+
+Editor.make()
+  .config((ctx) => {
+    ctx.update(uploadConfig.key, (prev) => ({
+      ...prev,
+      enableHtmlFileUploader: true,
+      uploader: myUploader,
+    }))
+  })
+  .use(upload)
+  .create()
+```
+
+---
+
+## `UploadOptions`
+
+```typescript
+export interface UploadOptions {
+  uploader: (
+    files: FileList,
+    schema: Schema,
+    ctx: Ctx,
+    insertPos: number
+  ) => Promise<Fragment | Node | Node[]>
+
+  enableHtmlFileUploader: boolean
+
+  uploadWidgetFactory: (
+    pos: number,
+    spec: Parameters<typeof Decoration.widget>[2]
+  ) => Decoration
+
+  getInsertPos?: (
+    event: ClipboardEvent | DragEvent,
+    ctx: Ctx,
+    defaultInsertPos: number
+  ) => number
+}
+```
+
+<ParamField body="uploader" type="function" required>
+  Receives the dropped or pasted `FileList`, the current ProseMirror `Schema`, the editor `Ctx`, and the document position where the files should be inserted. Must return a `Promise` that resolves to a `Fragment`, a single `Node`, or an array of `Node` values.
+</ParamField>
+
+<ParamField body="enableHtmlFileUploader" type="boolean" default="false">
+  When `true`, files pasted from HTML sources (such as images copied via a browser context menu) are also passed through the uploader instead of being inserted as their original URL.
+</ParamField>
+
+<ParamField body="uploadWidgetFactory" type="function">
+  Produces the ProseMirror `Decoration` widget shown at the upload position while the uploader `Promise` is pending. The default renders `<span>Upload in progress...</span>`.
+</ParamField>
+
+<ParamField body="getInsertPos" type="function">
+  Optional override for the insertion position calculation. Receives the raw DOM event, the editor `Ctx`, and the default computed position. Return a document position integer.
+</ParamField>
+
+---
+
+## `uploadPlugin`
+
+The internal `$prose` wrapper around the ProseMirror upload plugin. Handles both `handlePaste` and `handleDrop` events. You do not need to reference this directly when using the `upload` array export.
+
+---
+
+## Custom uploader
+
+Replace the default base64 uploader with your own upload function:
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { upload, uploadConfig } from '@milkdown/kit/plugin/upload'
+import type { Uploader } from '@milkdown/kit/plugin/upload'
+import type { Node } from '@milkdown/kit/prose/model'
+
+const uploader: Uploader = async (files, schema) => {
+  const images: File[] = []
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files.item(i)
+    if (!file || !file.type.includes('image')) continue
+    images.push(file)
+  }
+
+  const nodes: Node[] = await Promise.all(
+    images.map(async (image) => {
+      const src = await uploadToYourCDN(image)
+      return schema.nodes.image.createAndFill({ src, alt: image.name }) as Node
+    })
+  )
+
+  return nodes
+}
+
+Editor.make()
+  .config((ctx) => {
+    ctx.update(uploadConfig.key, (prev) => ({ ...prev, uploader }))
+  })
+  .use(commonmark)
+  .use(upload)
+  .create()
+```
+
+---
+
+## Default uploader utilities
+
+### `defaultUploader`
+
+The built-in uploader. Filters the `FileList` to image files only and converts each image to a base64 data URL using `readImageAsBase64`. Non-image files are ignored.
+
+```typescript
+export const defaultUploader: Uploader
+```
+
+### `readImageAsBase64`
+
+Reads a single `File` as a base64 data URL using `FileReader`.
+
+```typescript
+export function readImageAsBase64(
+  file: File
+): Promise<{ alt: string; src: string }>
+```
+
+Returns an object with:
+- `src` — the `data:` URL string.
+- `alt` — the original file name.

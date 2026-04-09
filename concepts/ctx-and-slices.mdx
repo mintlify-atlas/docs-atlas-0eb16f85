@@ -1,0 +1,244 @@
+---
+title: 'Ctx and slices'
+description: 'The typed context container that connects Milkdown plugins through shared, reactive state.'
+---
+
+Ctx is the dependency-injection backbone of Milkdown. Every plugin receives its own `Ctx` instance, and all instances share the same underlying `Container` and `Clock`. This means any plugin can read or write state registered by any other plugin — provided it waits for the right timer first.
+
+## What is Ctx
+
+`Ctx` is a class with methods to inject, read, write, and remove typed values (slices) as well as to record and wait on timers. Every plugin receives its own `Ctx` view so the inspector can track which plugin touched which slice:
+
+```typescript
+// Simplified — packages/ctx/src/plugin/ctx.ts
+class Ctx {
+  inject<T>(sliceType: SliceType<T>, value?: T): this
+  remove<T>(sliceType: SliceType<T> | string): this
+  get<T>(sliceType: SliceType<T> | string): T
+  set<T>(sliceType: SliceType<T> | string, value: T): void
+  update<T>(sliceType: SliceType<T> | string, updater: (prev: T) => T): void
+  use<T>(sliceType: SliceType<T> | string): Slice<T>
+  record(timerType: TimerType): this
+  clearTimer(timerType: TimerType): this
+  wait(timer: TimerType): Promise<void>
+  waitTimers(slice: SliceType<TimerType[]>): Promise<void>
+  done(timer: TimerType): void
+}
+```
+
+## What are slices
+
+A slice is a typed, named value that lives inside the shared `Container`. Think of it as a strongly-typed global variable with a stable identity across the entire editor lifetime.
+
+Slices are created with `createSlice`, which returns a `SliceType` — a reusable blueprint:
+
+```typescript
+import { createSlice } from '@milkdown/ctx'
+
+// createSlice(defaultValue, uniqueName)
+const counterCtx = createSlice(0, 'counter')
+```
+
+The `SliceType` holds the default value, the name, and a unique symbol that identifies it in the container. You pass it to `ctx.inject()` to register an instance in the container, and to `ctx.get()` / `ctx.set()` / `ctx.update()` to access it.
+
+## Registering a slice: ctx.inject()
+
+A plugin must inject a slice before any other plugin can use it. Injection happens in the setup phase (synchronously, before the runner is returned):
+
+```typescript
+import { createSlice } from '@milkdown/ctx'
+import type { MilkdownPlugin } from '@milkdown/ctx'
+
+const myDataCtx = createSlice([] as string[], 'myData')
+
+const myPlugin: MilkdownPlugin = (ctx) => {
+  // Inject with the default value
+  ctx.inject(myDataCtx)
+
+  // Or inject with an override value
+  ctx.inject(myDataCtx, ['initial', 'items'])
+
+  return async () => {
+    // cleanup
+    return () => {
+      ctx.remove(myDataCtx)
+    }
+  }
+}
+```
+
+## Reading slices: ctx.get()
+
+`ctx.get()` returns the current value of a slice. You can pass a `SliceType` or the slice's string name:
+
+```typescript
+const plugin: MilkdownPlugin = (ctx) => {
+  return async () => {
+    // By SliceType (type-safe)
+    const items = ctx.get(myDataCtx)      // string[]
+
+    // By name string (less type-safe, but useful for dynamic lookups)
+    const items2 = ctx.get('myData')
+  }
+}
+```
+
+## Writing slices: ctx.set() and ctx.update()
+
+`ctx.set()` replaces the value entirely. `ctx.update()` applies a callback to the previous value, which is safer when multiple plugins may be appending to a shared array:
+
+```typescript
+// Replace
+ctx.set(myDataCtx, ['a', 'b'])
+
+// Transform
+ctx.update(myDataCtx, (prev) => [...prev, 'c'])
+```
+
+Both `set` and `update` notify any watchers registered with `slice.on()`.
+
+## Accessing the raw Slice object: ctx.use()
+
+`ctx.use()` returns the `Slice` instance itself, which exposes `on()` / `once()` / `off()` for watching value changes:
+
+```typescript
+const slice = ctx.use(myDataCtx)
+
+const unwatch = slice.on((value) => {
+  console.log('myData changed to', value)
+})
+
+// later
+unwatch()
+```
+
+## Removing a slice: ctx.remove()
+
+Plugins should remove their slices in their cleanup function to avoid stale entries when the editor is destroyed and recreated:
+
+```typescript
+return () => {
+  ctx.remove(myDataCtx)
+}
+```
+
+## A real example: listenerCtx
+
+The `@milkdown/plugin-listener` package is a good illustration. It creates a slice that holds a `ListenerManager` instance, injects it during setup, and lets user code read it via `editor.config()`:
+
+```typescript
+// packages/plugins/plugin-listener/src/index.ts
+import { createSlice } from '@milkdown/ctx'
+import type { MilkdownPlugin } from '@milkdown/ctx'
+
+export const listenerCtx = createSlice<ListenerManager>(
+  new ListenerManager(),
+  'listener'
+)
+
+export const listener: MilkdownPlugin = (ctx) => {
+  // Inject a fresh ListenerManager on every editor creation
+  ctx.inject(listenerCtx, new ListenerManager())
+
+  return async () => {
+    await ctx.wait(InitReady)
+    const manager = ctx.get(listenerCtx)
+    // ... attach ProseMirror plugin using manager.listeners
+  }
+}
+```
+
+User code accesses the manager through `editor.config()`:
+
+```typescript
+import { listener, listenerCtx } from '@milkdown/plugin-listener'
+
+await Editor.make()
+  .use(listener)
+  .config((ctx) => {
+    ctx.get(listenerCtx)
+      .markdownUpdated((ctx, markdown, prevMarkdown) => {
+        console.log(markdown)
+      })
+  })
+  .create()
+```
+
+## Timers and async sequencing
+
+Timers let plugins declare a readiness signal and let other plugins wait for it. This is how Milkdown coordinates initialization order without hardcoding dependencies.
+
+### Creating a timer
+
+```typescript
+import { createTimer } from '@milkdown/ctx'
+
+export const MyPluginReady = createTimer('MyPluginReady')
+```
+
+### Recording and resolving a timer
+
+A plugin records the timer in setup and calls `ctx.done()` when its work completes:
+
+```typescript
+const myPlugin: MilkdownPlugin = (ctx) => {
+  ctx.record(MyPluginReady)
+
+  return async () => {
+    // ... do work ...
+    ctx.done(MyPluginReady)
+
+    return () => {
+      ctx.clearTimer(MyPluginReady)
+    }
+  }
+}
+```
+
+### Waiting on a timer
+
+Another plugin waits for `MyPluginReady` before proceeding:
+
+```typescript
+const dependentPlugin: MilkdownPlugin = (ctx) => {
+  return async () => {
+    await ctx.wait(MyPluginReady)
+    // safe to read slices registered by myPlugin here
+  }
+}
+```
+
+### waitTimers — waiting on a list stored in a slice
+
+The pattern of storing a list of timers in a slice and calling `ctx.waitTimers()` is used throughout the internal plugins:
+
+```typescript
+// packages/core/src/internal-plugin/parser.ts
+export const parserTimerCtx = createSlice([SchemaReady] as TimerType[], 'parserTimer')
+
+const parser: MilkdownPlugin = (ctx) => {
+  ctx.inject(parserTimerCtx, [SchemaReady]).record(ParserReady)
+
+  return async () => {
+    // Waits for every timer in the parserTimerCtx slice
+    await ctx.waitTimers(parserTimerCtx)
+    // ...
+    ctx.done(ParserReady)
+  }
+}
+```
+
+This pattern lets third-party plugins add extra timers to `parserTimerCtx` and delay the parser until their own work is done.
+
+<Tip>
+  Timer names must be globally unique. Choose a descriptive name that identifies both the package and the stage, for example `'@my-scope/my-plugin/Ready'`.
+</Tip>
+
+## Checking whether a slice or timer exists
+
+```typescript
+ctx.isInjected(myDataCtx)   // boolean — is the slice in the container?
+ctx.isRecorded(MyTimer)     // boolean — is the timer in the clock?
+```
+
+Use these guards in plugins that only conditionally depend on another plugin's slices.

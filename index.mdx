@@ -1,97 +1,117 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Milkdown"
+description: "A plugin-driven WYSIWYG markdown editor framework built on ProseMirror and remark."
 ---
 
-## Setting up
+Milkdown is a lightweight, plugin-driven WYSIWYG markdown editor framework. Built on top of [ProseMirror](https://prosemirror.net/) and [remark](https://github.com/remarkjs/remark), it lets you compose rich editing experiences from focused, composable plugins — or get started instantly with the opinionated **Crepe** editor.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Install Milkdown and create your first editor in minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Using Crepe" icon="wand-magic-sparkles" href="/using-crepe">
+    Get a fully-featured editor with zero configuration using the Crepe preset.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Core Concepts" icon="layer-group" href="/concepts/architecture">
+    Understand the plugin system, context model, and editor lifecycle.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/api/core">
+    Explore the full public API for core, plugins, and components.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Why Milkdown?
 
-Everything you need to create world-class documentation.
+Milkdown gives you full control over the editing experience without forcing you to start from scratch. Every feature — from GFM tables to slash commands to collaborative editing — is an independent plugin you can include, configure, or replace.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={3}>
+  <Card title="Plugin-driven" icon="puzzle-piece">
+    Every feature is a plugin. Compose exactly the editor you need.
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Framework integrations" icon="plug">
+    First-class React and Vue support via official integration packages.
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Markdown faithful" icon="file-lines">
+    Built on remark — your documents are always valid markdown.
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="CommonMark & GFM" icon="github">
+    Full support for CommonMark and GitHub Flavored Markdown out of the box.
   </Card>
-</Columns>
+  <Card title="Collaborative editing" icon="users">
+    Real-time collaboration powered by Yjs and the collab plugin.
+  </Card>
+  <Card title="AI-ready" icon="sparkles">
+    Streaming plugin for progressive AI-generated markdown rendering.
+  </Card>
+</CardGroup>
 
-## Need inspiration?
+## Get started
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Steps>
+  <Step title="Install the packages">
+    Install `@milkdown/kit` for the full editor toolkit, or individual packages for a minimal setup.
+
+    ```bash
+    npm install @milkdown/kit
+    ```
+  </Step>
+  <Step title="Create an editor">
+    Use the `Editor` class to compose an editor with the plugins you need.
+
+    ```typescript
+    import { Editor } from '@milkdown/kit/core'
+    import { commonmark } from '@milkdown/kit/preset/commonmark'
+
+    const editor = await Editor.make()
+      .config((ctx) => {
+        // configure root element, default value, etc.
+      })
+      .use(commonmark)
+      .create()
+    ```
+  </Step>
+  <Step title="Or use Crepe for a ready-made editor">
+    The `Crepe` class bundles all popular features with sensible defaults.
+
+    ```typescript
+    import { Crepe } from '@milkdown/crepe'
+    import '@milkdown/crepe/theme/common/style.css'
+    import '@milkdown/crepe/theme/classic.css'
+
+    const crepe = new Crepe({ root: document.getElementById('editor') })
+    await crepe.create()
+    ```
+  </Step>
+  <Step title="Integrate with React or Vue">
+    Use the official framework packages for seamless component integration.
+
+    ```tsx
+    import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
+    import { commonmark } from '@milkdown/kit/preset/commonmark'
+
+    export function MyEditor() {
+      useEditor((root) =>
+        Editor.make().config(ctx => { /* ... */ }).use(commonmark)
+      )
+      return <Milkdown />
+    }
+    ```
+  </Step>
+</Steps>
+
+## Explore the docs
+
+<CardGroup cols={2}>
+  <Card title="Integrations" icon="cubes" href="/integrations/react">
+    React, Vue, and vanilla JS integration guides with working examples.
+  </Card>
+  <Card title="Plugins & Presets" icon="blocks" href="/plugins/presets">
+    Browse all official plugins — from syntax highlighting to collaborative editing.
+  </Card>
+  <Card title="Writing Plugins" icon="pen-to-square" href="/plugins/writing-plugins">
+    Learn how to build your own Milkdown plugins using the ctx system.
+  </Card>
+  <Card title="Advanced Topics" icon="graduation-cap" href="/advanced/theming">
+    Theming, collaborative editing, and custom component development.
+  </Card>
+</CardGroup>

@@ -1,0 +1,223 @@
+---
+title: plugin-collab
+description: Real-time collaborative editing for Milkdown using Yjs and y-prosemirror.
+---
+
+The `@milkdown/plugin-collab` package integrates [Yjs](https://docs.yjs.dev/) with Milkdown through [y-prosemirror](https://github.com/yjs/y-prosemirror). It exposes a `CollabService` that manages connecting and disconnecting the Yjs document, awareness (cursors), and the collaborative undo/redo stack.
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/plugin-collab yjs y-prosemirror
+```
+
+```bash yarn
+yarn add @milkdown/plugin-collab yjs y-prosemirror
+```
+
+```bash pnpm
+pnpm add @milkdown/plugin-collab yjs y-prosemirror
+```
+
+</CodeGroup>
+
+## Usage
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
+import { Doc } from 'yjs'
+import { WebsocketProvider } from 'y-websocket'
+
+async function setup() {
+  const editor = await Editor.make()
+    .use(commonmark)
+    .use(collab)
+    .create()
+
+  const doc = new Doc()
+  const provider = new WebsocketProvider('wss://your-server', 'room', doc)
+
+  editor.action((ctx) => {
+    ctx.get(collabServiceCtx)
+      .bindDoc(doc)
+      .setAwareness(provider.awareness)
+      .connect()
+  })
+}
+```
+
+---
+
+## `collab`
+
+The Milkdown plugin. Register it with `.use(collab)`.
+
+```typescript
+import type { MilkdownPlugin } from '@milkdown/ctx'
+
+export const collab: MilkdownPlugin
+```
+
+When the plugin loads it creates a fresh `CollabService`, injects it into `collabServiceCtx`, and waits for `EditorViewReady` before binding the service to the editor context.
+
+---
+
+## `collabServiceCtx`
+
+A slice that holds the active `CollabService` instance. Access it with `ctx.get(collabServiceCtx)`.
+
+```typescript
+import { createSlice } from '@milkdown/ctx'
+
+export const collabServiceCtx: SliceType<CollabService, 'collabServiceCtx'>
+```
+
+---
+
+## `CollabReady`
+
+A timer (created with `createTimer`) that resolves after the collab plugin has finished initializing and bound the service to the editor view. You can await it inside other plugins with `ctx.wait(CollabReady)`.
+
+---
+
+## `CollabService`
+
+The main class for managing the collaboration lifecycle. All methods return `this` so calls can be chained.
+
+```typescript
+export class CollabService {
+  bindCtx(ctx: Ctx): this
+  bindDoc(doc: Doc): this
+  bindXmlFragment(xmlFragment: XmlFragment): this
+  setOptions(options: CollabServiceOptions): this
+  mergeOptions(options: Partial<CollabServiceOptions>): this
+  setAwareness(awareness: Awareness): this
+  applyTemplate(
+    template: DefaultValue,
+    condition?: (yDocNode: Node, templateNode: Node) => boolean
+  ): this
+  connect(): this
+  disconnect(): this
+}
+```
+
+### Methods
+
+<AccordionGroup>
+  <Accordion title="bindCtx(ctx)">
+    Binds the Milkdown `Ctx` to the service. This is called automatically by the `collab` plugin — you do not need to call it manually.
+  </Accordion>
+
+  <Accordion title="bindDoc(doc)">
+    Binds a Yjs `Doc`. The service uses `doc.getXmlFragment('prosemirror')` as the shared XML fragment.
+
+    ```typescript
+    const doc = new Doc()
+    service.bindDoc(doc)
+    ```
+  </Accordion>
+
+  <Accordion title="bindXmlFragment(xmlFragment)">
+    Binds a specific Yjs `XmlFragment` directly, instead of deriving it from a `Doc`. Use this when you manage the fragment lifecycle yourself.
+
+    ```typescript
+    const fragment = doc.getXmlFragment('custom-key')
+    service.bindXmlFragment(fragment)
+    ```
+  </Accordion>
+
+  <Accordion title="setOptions(options)">
+    Replaces the current `CollabServiceOptions` entirely.
+
+    ```typescript
+    service.setOptions({ yCursorStateField: 'cursor' })
+    ```
+  </Accordion>
+
+  <Accordion title="mergeOptions(options)">
+    Merges a partial `CollabServiceOptions` into the existing options using `Object.assign`.
+
+    ```typescript
+    service.mergeOptions({ yUndoOpts: { trackedOrigins: ['my-origin'] } })
+    ```
+  </Accordion>
+
+  <Accordion title="setAwareness(awareness)">
+    Binds a Yjs `Awareness` instance for rendering remote cursors via `yCursorPlugin`.
+
+    ```typescript
+    service.setAwareness(provider.awareness)
+    ```
+  </Accordion>
+
+  <Accordion title="applyTemplate(template, condition?)">
+    Applies an initial document template to the Yjs document when a condition is met. By default, the template is only applied when the Yjs document is empty (`textContent.length === 0`).
+
+    ```typescript
+    service.applyTemplate('# Hello world\n', (yDoc) => yDoc.textContent.length === 0)
+    ```
+
+    `template` accepts any `DefaultValue` (a markdown string, HTML string, or ProseMirror JSON object).
+  </Accordion>
+
+  <Accordion title="connect()">
+    Activates the y-prosemirror plugins (`ySyncPlugin`, `yUndoPlugin`, `yCursorPlugin` if awareness is set, and a keymap plugin for `Mod-z` / `Mod-y`). Reconfigures the editor view with the new plugin set.
+
+    Has no effect if already connected.
+  </Accordion>
+
+  <Accordion title="disconnect()">
+    Removes all y-prosemirror plugins from the editor view and reconfigures the view. Has no effect if already disconnected.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## `CollabServiceOptions`
+
+Options passed to the underlying y-prosemirror plugins.
+
+```typescript
+export interface CollabServiceOptions {
+  yCursorStateField?: string
+  ySyncOpts?: YSyncOpts
+  yCursorOpts?: yCursorOpts
+  yUndoOpts?: yUndoOpts
+}
+```
+
+<ParamField body="yCursorStateField" type="string">
+  The ProseMirror plugin state field name used by `yCursorPlugin`. Only relevant when using awareness.
+</ParamField>
+
+<ParamField body="ySyncOpts" type="YSyncOpts">
+  Options forwarded to `ySyncPlugin`. Includes `colors`, `colorMapping`, and `permanentUserData`.
+</ParamField>
+
+<ParamField body="yCursorOpts" type="yCursorOpts">
+  Options forwarded to `yCursorPlugin`. Includes `cursorBuilder`, `selectionBuilder`, and `getSelection`.
+</ParamField>
+
+<ParamField body="yUndoOpts" type="yUndoOpts">
+  Options forwarded to `yUndoPlugin`. Includes `protectedNodes`, `trackedOrigins`, and `undoManager`.
+</ParamField>
+
+---
+
+## Keymaps registered by `connect()`
+
+When connected, the service registers a ProseMirror keymap plugin with:
+
+| Shortcut | Action |
+| --- | --- |
+| `Mod-z` | Yjs undo |
+| `Mod-y` | Yjs redo |
+| `Mod-Shift-z` | Yjs redo |
+
+<Note>
+  These shortcuts use Yjs's own undo/redo stack (`yUndoPlugin`), not the ProseMirror history plugin. Do not load both `@milkdown/plugin-history` and `@milkdown/plugin-collab` at the same time — they maintain separate history stacks and will conflict.
+</Note>

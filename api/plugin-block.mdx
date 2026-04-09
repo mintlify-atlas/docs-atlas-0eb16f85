@@ -1,0 +1,273 @@
+---
+title: plugin-block
+description: Block handle and drag-and-drop reordering for Milkdown — provider, service, and configuration API.
+---
+
+The `@milkdown/plugin-block` package adds a draggable block handle to Milkdown. The handle appears next to the block the cursor is hovering over and lets users drag blocks to reorder them. Like the slash and tooltip plugins, you supply the handle HTML element and control its appearance. Positioning is handled by [Floating UI](https://floating-ui.com/).
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/plugin-block
+```
+
+```bash yarn
+yarn add @milkdown/plugin-block
+```
+
+```bash pnpm
+pnpm add @milkdown/plugin-block
+```
+
+</CodeGroup>
+
+---
+
+## Usage
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { block, blockConfig } from '@milkdown/plugin-block'
+import { BlockProvider } from '@milkdown/plugin-block'
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.set(blockConfig.key, {
+      filterNodes: (pos, node) => node.type.name !== 'image',
+    })
+
+    ctx.set(block.key, {
+      view: (ctx) => {
+        const handle = document.createElement('div')
+        handle.className = 'block-handle'
+        handle.draggable = true
+
+        const provider = new BlockProvider({ ctx, content: handle })
+
+        return {
+          update: () => provider.update(),
+          destroy: () => provider.destroy(),
+        }
+      },
+    })
+  })
+  .use(commonmark)
+  .use(block)
+  .create()
+```
+
+---
+
+## `block`
+
+The main export. An array-like `BlockPlugin` value that registers the block spec context, the configuration context, the service context, the service instance context, and the ProseMirror plugin.
+
+```typescript
+export const block: BlockPlugin
+
+// Convenience properties on the array:
+block.key        // SliceType for the PluginSpec ctx (blockSpec)
+block.pluginKey  // $Prose key for the ProseMirror plugin
+```
+
+Use `block.key` to set the `PluginSpec` (including the `view` factory):
+
+```typescript
+ctx.set(block.key, {
+  view: (ctx) => { /* ... */ },
+})
+```
+
+---
+
+## `blockConfig`
+
+A `$ctx` slice that holds block-level configuration. Use it to control which nodes the drag handle appears next to.
+
+```typescript
+export const blockConfig: $Ctx<{ filterNodes: FilterNodes }, 'blockConfig'>
+```
+
+### `FilterNodes`
+
+```typescript
+export type FilterNodes = (pos: ResolvedPos, node: Node) => boolean
+```
+
+Return `true` to allow the handle to appear next to the node; return `false` to hide it. The default filter hides the handle for nodes inside a table.
+
+```typescript
+ctx.set(blockConfig.key, {
+  filterNodes: (pos, node) => {
+    // Hide handle for code blocks
+    if (node.type.name === 'code_block') return false
+    return true
+  },
+})
+```
+
+---
+
+## `BlockProvider`
+
+A helper class that subscribes to `BlockService` messages and positions the block handle using Floating UI.
+
+```typescript
+export class BlockProvider {
+  get active(): ActiveNode | null
+
+  constructor(options: BlockProviderOptions)
+
+  update(): void
+  show(active: ActiveNode): void
+  hide(): void
+  destroy(): void
+}
+```
+
+### `BlockProviderOptions`
+
+```typescript
+export interface BlockProviderOptions {
+  ctx: Ctx
+  content: HTMLElement
+  shouldShow?: (view: EditorView, prevState?: EditorState) => boolean
+  getOffset?: (deriveContext: DeriveContext) => OffsetOptions
+  getPosition?: (deriveContext: DeriveContext) => Omit<DOMRect, 'toJSON'>
+  getPlacement?: (deriveContext: DeriveContext) => Placement
+  middleware?: Middleware[]
+  floatingUIOptions?: Partial<ComputePositionConfig>
+  root?: HTMLElement
+}
+```
+
+<ParamField body="ctx" type="Ctx" required>
+  The Milkdown editor context. Pass the `ctx` received in the ProseMirror plugin `view` factory.
+</ParamField>
+
+<ParamField body="content" type="HTMLElement" required>
+  The block handle element. The provider appends it to the editor's parent (or `root`) and sets `element.draggable = true`.
+</ParamField>
+
+<ParamField body="getOffset" type="function">
+  Calculates the Floating UI offset for the handle relative to the active node. Receives a `DeriveContext` object.
+</ParamField>
+
+<ParamField body="getPosition" type="function">
+  Overrides the reference bounding rect used by Floating UI. By default the active node's DOM element bounding rect is used.
+</ParamField>
+
+<ParamField body="getPlacement" type="function">
+  Overrides the Floating UI placement. Defaults to `'left'`.
+</ParamField>
+
+<ParamField body="middleware" type="Middleware[]">
+  Additional Floating UI middlewares appended after the built-in `flip` and `offset` middlewares.
+</ParamField>
+
+<ParamField body="floatingUIOptions" type="Partial<ComputePositionConfig>">
+  Full Floating UI `computePosition` options.
+</ParamField>
+
+<ParamField body="root" type="HTMLElement">
+  The DOM element the handle is appended to. Defaults to the editor's parent element.
+</ParamField>
+
+### Methods
+
+<AccordionGroup>
+  <Accordion title="update()">
+    Call this from the ProseMirror plugin view's `update` method. Uses `requestAnimationFrame` to defer initialization. On first call it appends the handle element, binds the `BlockService`, and registers mouse and drag events on the handle.
+  </Accordion>
+
+  <Accordion title="show(active)">
+    Positions the handle next to the `active` node using Floating UI and sets `element.dataset.show = 'true'`.
+  </Accordion>
+
+  <Accordion title="hide()">
+    Sets `element.dataset.show = 'false'`.
+  </Accordion>
+
+  <Accordion title="destroy()">
+    Unbinds the `BlockService`, removes DOM event listeners, and removes the handle element from the DOM.
+  </Accordion>
+</AccordionGroup>
+
+### `active` getter
+
+Returns the currently hovered `ActiveNode`, or `null` when no block is active.
+
+---
+
+## `DeriveContext`
+
+Passed to `getOffset`, `getPosition`, and `getPlacement` callbacks.
+
+```typescript
+export interface DeriveContext {
+  ctx: Ctx
+  active: ActiveNode
+  editorDom: HTMLElement
+  blockDom: HTMLElement
+}
+```
+
+---
+
+## `ActiveNode`
+
+A read-only snapshot of the hovered node.
+
+```typescript
+export type ActiveNode = Readonly<{
+  $pos: ResolvedPos  // Resolved ProseMirror position
+  node: Node         // The ProseMirror node
+  el: HTMLElement    // The corresponding DOM element
+}>
+```
+
+---
+
+## `BlockService`
+
+The internal service class that tracks mouse movement, detects the active block, and notifies the `BlockProvider` to show or hide the handle. You do not need to use `BlockService` directly — `BlockProvider` manages it automatically.
+
+Exported methods on `BlockService` (for advanced use):
+
+| Method | Description |
+| --- | --- |
+| `bind(ctx, notify)` | Binds the editor context and the notify callback. Called by `BlockProvider`. |
+| `addEvent(dom)` | Attaches `mousedown`, `mouseup`, `dragstart`, and `dragend` listeners to the handle element. |
+| `removeEvent(dom)` | Removes the event listeners added by `addEvent`. |
+| `unBind()` | Removes the notify callback. |
+
+---
+
+## Drag-and-drop behaviour
+
+When the user starts dragging the handle:
+
+1. `BlockService` creates a `NodeSelection` for the active block.
+2. It sets `dataTransfer` with the serialized HTML and plain text of the selection.
+3. It sets the drag image to the active block's DOM element.
+4. ProseMirror handles the drop and repositions the node.
+
+Scroll-assist is built in: while dragging, the provider scrolls the editor's parent container when the cursor approaches the top or bottom edge.
+
+---
+
+## Visibility toggling via `data-show`
+
+```css
+.block-handle {
+  position: absolute;
+  display: none;
+}
+
+.block-handle[data-show='true'] {
+  display: flex;
+}
+```

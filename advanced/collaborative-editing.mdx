@@ -1,0 +1,312 @@
+---
+title: 'Collaborative editing'
+description: 'Add real-time collaborative editing to Milkdown using the @milkdown/plugin-collab package, Yjs, and y-prosemirror.'
+---
+
+Milkdown supports real-time collaborative editing through `@milkdown/plugin-collab`. The plugin wraps [y-prosemirror](https://github.com/yjs/y-prosemirror) to sync the ProseMirror document state with a [Yjs](https://yjs.dev) shared document, giving you conflict-free merging, cursor awareness, and collaborative undo/redo out of the box.
+
+## How it works
+
+The collab plugin exposes a `CollabService` that manages three y-prosemirror plugins:
+
+- **ySyncPlugin** — keeps the ProseMirror document in sync with a Yjs `XmlFragment`
+- **yCursorPlugin** — renders remote cursors using `Awareness`
+- **yUndoPlugin** — replaces ProseMirror's history with Yjs-aware undo/redo
+
+The `CollabService` is bound to the editor context after the editor view is ready, then you call `.connect()` to activate sync. You call `.disconnect()` to cleanly remove the collab plugins without destroying the editor.
+
+## Installation
+
+```bash
+npm install @milkdown/plugin-collab yjs y-prosemirror
+```
+
+For a WebSocket transport (the most common setup), also install a Yjs WebSocket provider:
+
+```bash
+npm install y-websocket
+```
+
+## Basic setup
+
+<Steps>
+  <Step title="Add the plugin to your editor">
+    Register the `collab` plugin. It injects `collabServiceCtx` into the editor context and waits for the editor view to be ready before binding.
+
+    ```typescript
+    import { Editor } from '@milkdown/kit/core'
+    import { commonmark } from '@milkdown/kit/preset/commonmark'
+    import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
+
+    const editor = await Editor.make()
+      .use(commonmark)
+      .use(collab)
+      .create()
+    ```
+  </Step>
+
+  <Step title="Create a Yjs document and provider">
+    Create a `Y.Doc` and connect it to a transport provider. The `WebsocketProvider` from `y-websocket` handles server discovery and reconnection automatically.
+
+    ```typescript
+    import * as Y from 'yjs'
+    import { WebsocketProvider } from 'y-websocket'
+
+    const ydoc = new Y.Doc()
+
+    const provider = new WebsocketProvider(
+      'wss://your-collab-server.example.com',
+      'my-document-room',
+      ydoc
+    )
+    ```
+
+    The second argument to `WebsocketProvider` is the room name. Every client connecting with the same room name will share the same document.
+  </Step>
+
+  <Step title="Configure and connect CollabService">
+    Retrieve the `CollabService` from the editor context, bind the Yjs document, optionally bind awareness for cursor tracking, then call `.connect()`.
+
+    ```typescript
+    editor.action((ctx) => {
+      const collabService = ctx.get(collabServiceCtx)
+
+      collabService
+        .bindDoc(ydoc)
+        .setAwareness(provider.awareness)
+        .connect()
+    })
+    ```
+
+    `bindDoc` calls `doc.getXmlFragment('prosemirror')` internally and stores the fragment. If you need to use a different fragment name or share the fragment between multiple editors, use `bindXmlFragment` instead:
+
+    ```typescript
+    const fragment = ydoc.getXmlFragment('custom-fragment')
+
+    collabService
+      .bindXmlFragment(fragment)
+      .setAwareness(provider.awareness)
+      .connect()
+    ```
+  </Step>
+</Steps>
+
+## Seeding initial content
+
+When a user opens an empty document for the first time, you may want to pre-populate it with template content. Use `applyTemplate` to write content into the Yjs document only when it is empty:
+
+```typescript
+editor.action((ctx) => {
+  const collabService = ctx.get(collabServiceCtx)
+
+  collabService
+    .bindDoc(ydoc)
+    .setAwareness(provider.awareness)
+    .applyTemplate('# My Document\n\nStart writing here.')
+    .connect()
+})
+```
+
+`applyTemplate` accepts a markdown string or a ProseMirror `Node`. By default it only writes the template when the Yjs document is empty (`.textContent.length === 0`). You can supply a custom condition function as the second argument:
+
+```typescript
+collabService.applyTemplate(
+  defaultContent,
+  (yDocNode, templateNode) => {
+    // Return true to apply the template
+    return yDocNode.textContent.length === 0
+  }
+)
+```
+
+## Disconnecting and reconnecting
+
+Call `.disconnect()` to stop collaboration without destroying the editor. The collab plugins are removed from the editor state; the editor continues to work in standalone mode.
+
+```typescript
+editor.action((ctx) => {
+  ctx.get(collabServiceCtx).disconnect()
+})
+```
+
+To reconnect (for example, after a network outage), call `.connect()` again. The service reuses the previously bound `XmlFragment` and `Awareness`.
+
+```typescript
+editor.action((ctx) => {
+  ctx.get(collabServiceCtx).connect()
+})
+```
+
+## Options reference
+
+Pass a `CollabServiceOptions` object to `.setOptions()` or `.mergeOptions()` before connecting:
+
+```typescript
+collabService.setOptions({
+  // Custom field name used by yCursorPlugin to store cursor state
+  yCursorStateField: 'cursor',
+
+  // Options forwarded to ySyncPlugin
+  ySyncOpts: {
+    colors: [
+      { light: '#ecd44433', dark: '#ecd444' },
+      { light: '#ee635233', dark: '#ee6352' },
+    ],
+  },
+
+  // Options forwarded to yCursorPlugin
+  yCursorOpts: {
+    cursorBuilder: (user) => {
+      const cursor = document.createElement('span')
+      cursor.style.borderLeft = `2px solid ${user.color}`
+      cursor.style.marginLeft = '-1px'
+      return cursor
+    },
+  },
+
+  // Options forwarded to yUndoPlugin
+  yUndoOpts: {
+    protectedNodes: new Set(['image']),
+  },
+})
+```
+
+## Full working example
+
+The example below connects to a public Yjs demo server. Replace the WebSocket URL with your own server in production.
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
+import * as Y from 'yjs'
+import { WebsocketProvider } from 'y-websocket'
+
+async function createCollabEditor(container: HTMLElement, roomName: string) {
+  // 1. Build the editor
+  const editor = await Editor.make()
+    .config((ctx) => {
+      // Point the editor at your container element
+      const { editorViewOptionsCtx } = await import('@milkdown/kit/core')
+      // (rootCtx setup omitted for brevity — see Integration guides)
+    })
+    .use(commonmark)
+    .use(collab)
+    .create()
+
+  // 2. Create the Yjs document and connect to the server
+  const ydoc = new Y.Doc()
+  const provider = new WebsocketProvider(
+    'wss://demos.yjs.dev/ws',
+    roomName,
+    ydoc
+  )
+
+  // 3. Wire up CollabService
+  editor.action((ctx) => {
+    const collabService = ctx.get(collabServiceCtx)
+
+    collabService
+      .bindDoc(ydoc)
+      .setAwareness(provider.awareness)
+      .applyTemplate('# Shared document\n\n')
+      .connect()
+  })
+
+  // 4. Clean up when the page unloads
+  window.addEventListener('beforeunload', () => {
+    editor.action((ctx) => {
+      ctx.get(collabServiceCtx).disconnect()
+    })
+    provider.destroy()
+    ydoc.destroy()
+  })
+
+  return editor
+}
+```
+
+## Collaborative undo/redo
+
+The collab plugin replaces ProseMirror's built-in history with `yUndoPlugin`, which tracks undo history per-user. The keyboard shortcuts `Mod-z` (undo) and `Mod-y` / `Mod-Shift-z` (redo) are remapped automatically via the `CollabKeymapPluginKey` plugin.
+
+Each user's undo stack is independent — pressing undo only reverses that user's own changes, not changes made by other collaborators.
+
+## Awareness and cursor colors
+
+The `yCursorPlugin` reads user metadata from the `Awareness` object. Set your user's color and name before connecting:
+
+```typescript
+provider.awareness.setLocalStateField('user', {
+  name: 'Alice',
+  color: '#6366f1',
+})
+```
+
+The plugin renders a cursor DOM element for each remote user. You can fully replace the cursor element using `yCursorOpts.cursorBuilder`:
+
+```typescript
+collabService.setOptions({
+  yCursorOpts: {
+    cursorBuilder: (user) => {
+      const wrap = document.createElement('span')
+      wrap.style.position = 'relative'
+      wrap.style.borderLeft = `2px solid ${user.color}`
+
+      const label = document.createElement('span')
+      label.textContent = user.name
+      label.style.cssText = `
+        position: absolute;
+        top: -20px;
+        left: 0;
+        background: ${user.color};
+        color: white;
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        white-space: nowrap;
+      `
+      wrap.appendChild(label)
+      return wrap
+    },
+  },
+})
+```
+
+## Offline support and conflict resolution
+
+Yjs uses Conflict-free Replicated Data Types (CRDTs), so offline changes merge automatically when connectivity is restored. No extra configuration is needed — the underlying Yjs document handles merging regardless of whether a provider is connected.
+
+If a user edits while offline, their `Y.Doc` accumulates updates locally. When the provider reconnects, it exchanges updates with the server and merges all concurrent changes without data loss.
+
+<Note>
+Offline persistence — storing Yjs updates in `IndexedDB` or `localStorage` across page reloads — requires an additional package such as `y-indexeddb`. The collab plugin itself does not handle local persistence.
+</Note>
+
+## Using Crepe
+
+If you use the Crepe high-level editor, access the underlying `Editor` instance through `crepe.editor`:
+
+```typescript
+import { Crepe } from '@milkdown/crepe'
+import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
+import * as Y from 'yjs'
+import { WebsocketProvider } from 'y-websocket'
+
+const crepe = new Crepe({ root: '#editor' })
+
+// Register the collab plugin before creating
+crepe.editor.use(collab)
+
+await crepe.create()
+
+const ydoc = new Y.Doc()
+const provider = new WebsocketProvider('wss://your-server.example.com', 'room', ydoc)
+
+crepe.editor.action((ctx) => {
+  ctx.get(collabServiceCtx)
+    .bindDoc(ydoc)
+    .setAwareness(provider.awareness)
+    .connect()
+})
+```

@@ -1,0 +1,392 @@
+---
+title: '@milkdown/transformer'
+description: Bidirectional transformation between remark (mdast) AST and ProseMirror documents — NodeSchema, MarkSchema, ParserState, and SerializerState.
+---
+
+`@milkdown/transformer` bridges two document models:
+
+- **remark / mdast** — the markdown AST produced by unified/remark
+- **ProseMirror** — the rich-text document model used by the editor
+
+You define how each node and mark type maps between the two models by providing `parseMarkdown` and `toMarkdown` specs as part of your schema. The `ParserState` and `SerializerState` classes drive the actual conversion.
+
+<Note>
+In most cases you do not use these classes directly. The `$node`, `$mark`, `$nodeSchema`, and `$markSchema` helpers in `@milkdown/utils` give you a higher-level API for defining node and mark types.
+</Note>
+
+---
+
+## Schema types
+
+### NodeSchema
+
+Extends ProseMirror's `NodeSpec` with transformer specs.
+
+```typescript
+interface NodeSchema extends NodeSpec {
+  readonly toMarkdown: NodeSerializerSpec
+  readonly parseMarkdown: NodeParserSpec
+  readonly priority?: number  // Default: 50
+}
+```
+
+Higher `priority` values cause the node's `parseDOM` rules to be tried first.
+
+### MarkSchema
+
+Extends ProseMirror's `MarkSpec` with transformer specs.
+
+```typescript
+interface MarkSchema extends MarkSpec {
+  readonly toMarkdown: MarkSerializerSpec
+  readonly parseMarkdown: MarkParserSpec
+}
+```
+
+---
+
+## Parser
+
+### NodeParserSpec
+
+Defines how a markdown AST node maps to a ProseMirror node.
+
+```typescript
+interface NodeParserSpec {
+  match(node: MarkdownNode): boolean
+  runner(state: ParserState, node: MarkdownNode, proseType: NodeType): void
+}
+```
+
+`match` identifies the AST node (typically by `node.type`). `runner` drives the `ParserState` to produce the corresponding ProseMirror structure.
+
+```typescript
+// Example: paragraph node
+const paragraphSchema: NodeSchema = {
+  content: 'inline*',
+  parseMarkdown: {
+    match: (node) => node.type === 'paragraph',
+    runner: (state, node, type) => {
+      state.openNode(type).next(node.children).closeNode()
+    },
+  },
+  toMarkdown: { /* ... */ },
+}
+```
+
+### MarkParserSpec
+
+Defines how a markdown AST node maps to a ProseMirror mark.
+
+```typescript
+interface MarkParserSpec {
+  match(node: MarkdownNode): boolean
+  runner(state: ParserState, node: MarkdownNode, proseType: MarkType): void
+}
+```
+
+```typescript
+// Example: emphasis mark
+const emphasisSchema: MarkSchema = {
+  parseMarkdown: {
+    match: (node) => node.type === 'emphasis',
+    runner: (state, node, type) => {
+      state.openMark(type).next(node.children).closeMark(type)
+    },
+  },
+  toMarkdown: { /* ... */ },
+}
+```
+
+### ParserState
+
+`ParserState` is a stack machine that transforms a remark AST into a ProseMirror document. It is created internally by the `parser` core plugin.
+
+```typescript
+class ParserState extends Stack<Node, ParserStackElement> {
+  readonly schema: Schema
+
+  static create(schema: Schema, remark: RemarkParser): Parser
+
+  // Node operations
+  openNode(nodeType: NodeType, attrs?: Attrs): ParserState
+  closeNode(): ParserState
+  addNode(nodeType: NodeType, attrs?: Attrs, content?: Node[]): ParserState
+  injectRoot(node: MarkdownNode, nodeType: NodeType, attrs?: Attrs): ParserState
+
+  // Mark operations
+  openMark(markType: MarkType, attrs?: Attrs): ParserState
+  closeMark(markType: MarkType): ParserState
+
+  // Text
+  addText(text: string): ParserState
+
+  // Delegation
+  next(nodes?: MarkdownNode | MarkdownNode[]): ParserState
+
+  // Output
+  toDoc(): Node
+  run(remark: RemarkParser, markdown: string): ParserState
+}
+```
+
+#### Key methods
+
+<AccordionGroup>
+  <Accordion title="openNode / closeNode">
+    Opens a new node context. Subsequent calls to `addNode`, `addText`, and nested `openNode` push content into this node until `closeNode` is called.
+
+    ```typescript
+    state.openNode(schema.nodes.bulletList)
+         .openNode(schema.nodes.listItem)
+         .next(itemChildren)
+         .closeNode()  // close listItem
+         .closeNode()  // close bulletList
+    ```
+  </Accordion>
+
+  <Accordion title="openMark / closeMark">
+    Adds a mark to the active mark set. All text nodes added while the mark is open will carry that mark. Call `closeMark` to remove it.
+
+    ```typescript
+    state.openMark(schema.marks.strong)
+         .next(children)
+         .closeMark(schema.marks.strong)
+    ```
+  </Accordion>
+
+  <Accordion title="next">
+    Delegates the given AST node(s) back to the state machine. The state finds the matching `NodeParserSpec` or `MarkParserSpec` by calling each schema spec's `match` function.
+
+    ```typescript
+    state.next(node.children)
+    ```
+  </Accordion>
+
+  <Accordion title="addText">
+    Appends a text node with the current active marks, merging with the previous text node if marks are identical.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Serializer
+
+### NodeSerializerSpec
+
+Defines how a ProseMirror node maps back to a markdown AST node.
+
+```typescript
+interface NodeSerializerSpec {
+  match(node: Node): boolean
+  runner(state: SerializerState, node: Node): void
+}
+```
+
+```typescript
+// Example: paragraph
+const paragraphSchema: NodeSchema = {
+  toMarkdown: {
+    match: (node) => node.type.name === 'paragraph',
+    runner: (state, node) => {
+      state.openNode('paragraph').next(node.content).closeNode()
+    },
+  },
+  parseMarkdown: { /* ... */ },
+}
+```
+
+### MarkSerializerSpec
+
+Defines how a ProseMirror mark maps back to a markdown AST node. Returning `true` from `runner` prevents the prose node from being processed afterward (the mark "consumes" the node).
+
+```typescript
+interface MarkSerializerSpec {
+  match(mark: Mark): boolean
+  runner(state: SerializerState, mark: Mark, node: Node): void | boolean
+}
+```
+
+```typescript
+// Example: emphasis
+const emphasisSchema: MarkSchema = {
+  toMarkdown: {
+    match: (mark) => mark.type.name === 'emphasis',
+    runner: (state, mark) => {
+      state.withMark(mark, 'emphasis')
+    },
+  },
+  parseMarkdown: { /* ... */ },
+}
+```
+
+### SerializerState
+
+`SerializerState` is a stack machine that transforms a ProseMirror document into a remark AST, then stringifies it via remark.
+
+```typescript
+class SerializerState extends Stack<MarkdownNode, SerializerStackElement> {
+  readonly schema: Schema
+
+  static create(schema: Schema, remark: RemarkParser): Serializer
+
+  // Node operations
+  openNode(type: string, value?: string, props?: JSONRecord): SerializerState
+  closeNode(): SerializerState
+  addNode(type: string, children?: MarkdownNode[], value?: string, props?: JSONRecord): SerializerState
+
+  // Mark operations
+  withMark(mark: Mark, type: string, value?: string, props?: JSONRecord): SerializerState
+  closeMark(mark: Mark): SerializerState
+
+  // Delegation
+  next(nodes: Node | Fragment): SerializerState
+
+  // Output
+  toString(remark: RemarkParser): string
+  run(tree: Node): SerializerState
+}
+```
+
+#### Key methods
+
+<AccordionGroup>
+  <Accordion title="openNode / closeNode">
+    Opens a new mdast node context. The `type` string is the mdast node type (e.g. `'paragraph'`, `'heading'`). Optional `value` and `props` set additional mdast properties.
+
+    ```typescript
+    state.openNode('heading', undefined, { depth: 2 })
+         .next(node.content)
+         .closeNode()
+    ```
+  </Accordion>
+
+  <Accordion title="withMark">
+    Opens a mark node. Marks are closed automatically when the surrounding prose node finishes. In most cases you only need `withMark` and not `closeMark`.
+
+    ```typescript
+    state.withMark(mark, 'strong')
+    ```
+  </Accordion>
+
+  <Accordion title="next">
+    Iterates a ProseMirror `Node` or `Fragment`, calling `runner` on each child's matching serializer spec.
+
+    ```typescript
+    state.next(node.content)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Utility types
+
+### RemarkPlugin
+
+```typescript
+interface RemarkPlugin<T = Record<string, unknown>> {
+  plugin: Plugin<[T], Root>
+  options: T
+}
+```
+
+Wraps a unified/remark plugin with its options. Push values into `remarkPluginsCtx` to extend the remark pipeline.
+
+### RemarkParser
+
+```typescript
+type RemarkParser = ReturnType<typeof remark>
+```
+
+The unified processor instance stored in `remarkCtx`.
+
+### MarkdownNode
+
+```typescript
+type MarkdownNode = Node & {
+  children?: MarkdownNode[]
+  [x: string]: unknown
+}
+```
+
+A node in the remark/mdast AST. `Node` here is `Parameters<Transformer>[0]` from unified.
+
+---
+
+## Custom node example
+
+The following shows a complete `NodeSchema` for a custom `callout` node type.
+
+```typescript
+import type { NodeSchema } from '@milkdown/transformer'
+import { $node } from '@milkdown/utils'
+
+export const calloutNode = $node('callout', () => ({
+  group: 'block',
+  content: 'block+',
+  attrs: {
+    type: { default: 'info' },
+  },
+  parseDOM: [
+    {
+      tag: 'div[data-type="callout"]',
+      getAttrs: (dom) => ({
+        type: (dom as HTMLElement).dataset.calloutType ?? 'info',
+      }),
+    },
+  ],
+  toDOM: (node) => [
+    'div',
+    { 'data-type': 'callout', 'data-callout-type': node.attrs.type },
+    0,
+  ],
+  parseMarkdown: {
+    match: (astNode) =>
+      astNode.type === 'containerDirective' &&
+      astNode.name === 'callout',
+    runner: (state, astNode, type) => {
+      state
+        .openNode(type, { type: astNode.attributes?.type ?? 'info' })
+        .next(astNode.children)
+        .closeNode()
+    },
+  },
+  toMarkdown: {
+    match: (node) => node.type.name === 'callout',
+    runner: (state, node) => {
+      state
+        .openNode('containerDirective', undefined, {
+          name: 'callout',
+          attributes: { type: node.attrs.type },
+        })
+        .next(node.content)
+        .closeNode()
+    },
+  },
+} satisfies NodeSchema))
+```
+
+## Custom mark example
+
+```typescript
+import type { MarkSchema } from '@milkdown/transformer'
+import { $mark } from '@milkdown/utils'
+
+export const highlightMark = $mark('highlight', () => ({
+  parseDOM: [{ tag: 'mark' }],
+  toDOM: () => ['mark', 0],
+  parseMarkdown: {
+    match: (node) => node.type === 'highlight',
+    runner: (state, node, type) => {
+      state.openMark(type).next(node.children).closeMark(type)
+    },
+  },
+  toMarkdown: {
+    match: (mark) => mark.type.name === 'highlight',
+    runner: (state, mark) => {
+      state.withMark(mark, 'highlight')
+    },
+  },
+} satisfies MarkSchema))
+```

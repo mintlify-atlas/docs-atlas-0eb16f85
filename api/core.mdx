@@ -1,0 +1,341 @@
+---
+title: '@milkdown/core'
+description: The core package for Milkdown — provides the Editor class, EditorStatus enum, and the internal plugin system that bootstraps schema, parser, serializer, commands, keymap, and editor view.
+---
+
+The `@milkdown/core` package is the entry point for every Milkdown editor. It wires together ProseMirror and the remark AST pipeline through a set of internal plugins, all coordinated by the `Ctx` dependency-injection container from `@milkdown/ctx`.
+
+## Editor class
+
+`Editor` is the top-level object you interact with to configure, create, and destroy a Milkdown editor instance.
+
+### Static factory
+
+```typescript
+Editor.make(): Editor
+```
+
+Creates a new `Editor` instance. Prefer this over `new Editor()`.
+
+```typescript
+import { Editor } from '@milkdown/core'
+
+const editor = Editor.make()
+```
+
+### Instance methods
+
+All chainable methods return `this` unless noted otherwise.
+
+#### `.config(fn)`
+
+```typescript
+config(configure: (ctx: Ctx) => void | Promise<void>): Editor
+```
+
+Registers a configuration callback that runs during the `ConfigReady` phase. Use this to inject slice values before the editor boots.
+
+```typescript
+import { rootCtx, defaultValueCtx } from '@milkdown/core'
+
+editor.config((ctx) => {
+  ctx.set(rootCtx, document.getElementById('editor'))
+  ctx.set(defaultValueCtx, '# Hello Milkdown')
+})
+```
+
+#### `.removeConfig(fn)`
+
+```typescript
+removeConfig(configure: (ctx: Ctx) => void | Promise<void>): Editor
+```
+
+Removes a previously registered configuration callback. The reference must be the same function object passed to `.config()`.
+
+#### `.use(plugins)`
+
+```typescript
+use(plugins: MilkdownPlugin | MilkdownPlugin[]): Editor
+```
+
+Registers one or more plugins with the editor. Plugins added while the editor is already `Created` are prepared and started immediately.
+
+```typescript
+import { commonmark } from '@milkdown/preset-commonmark'
+
+editor.use(commonmark)
+```
+
+#### `.remove(plugins)`
+
+```typescript
+remove(plugins: MilkdownPlugin | MilkdownPlugin[]): Promise<Editor>
+```
+
+Removes one or more plugins at runtime, calling each plugin's cleanup function. If called while the editor is in `OnCreate` state, execution is deferred by 50 ms and retried.
+
+#### `.create()`
+
+```typescript
+create(): Promise<Editor>
+```
+
+Initializes the editor: loads internal plugins, runs all user plugins, and transitions through `OnCreate → Created`. If `create()` is called when the editor is already `Created`, it calls `destroy()` first and re-creates.
+
+```typescript
+await editor
+  .config(configFn)
+  .use(commonmark)
+  .create()
+```
+
+#### `.destroy(clearPlugins?)`
+
+```typescript
+destroy(clearPlugins?: boolean): Promise<Editor>
+```
+
+Tears down the editor by running all plugin cleanup functions and transitioning to `Destroyed`. When `clearPlugins` is `true`, all registered configuration callbacks are also cleared, letting you call `.config()` and `.create()` again for a full reset.
+
+#### `.action(fn)`
+
+```typescript
+action<T>(fn: (ctx: Ctx) => T): T
+```
+
+Executes a synchronous action with the editor's `Ctx`. Use this after `.create()` resolves to read or mutate editor state.
+
+```typescript
+import { getMarkdown } from '@milkdown/utils'
+
+const markdown = editor.action(getMarkdown())
+```
+
+#### `.enableInspector(enable?)`
+
+```typescript
+enableInspector(enable?: boolean): Editor
+```
+
+Enables (or disables) plugin telemetry collection. Must be called **before** `.create()`. Pass `false` to disable an already-enabled inspector.
+
+#### `.inspect()`
+
+```typescript
+inspect(): Telemetry[]
+```
+
+Returns an array of `Telemetry` objects — one per plugin — describing which slices were injected or consumed and which timers were recorded or awaited. Requires `.enableInspector()` to have been called first.
+
+```typescript
+editor.enableInspector()
+await editor.create()
+
+const telemetry = editor.inspect()
+console.log(telemetry)
+```
+
+#### `.onStatusChange(fn)`
+
+```typescript
+onStatusChange(fn: (status: EditorStatus) => void): Editor
+```
+
+Registers a callback that fires whenever the editor's status changes. Only one callback is active at a time; calling this method again replaces the previous subscription.
+
+```typescript
+editor.onStatusChange((status) => {
+  console.log('Editor status:', status)
+})
+```
+
+### Getters
+
+#### `.ctx`
+
+```typescript
+get ctx(): Ctx
+```
+
+Returns the editor's `Ctx` instance. Prefer `.action()` for safe access after creation.
+
+#### `.status`
+
+```typescript
+get status(): EditorStatus
+```
+
+Returns the current `EditorStatus` value.
+
+---
+
+## EditorStatus enum
+
+Represents the lifecycle state of an editor instance.
+
+```typescript
+enum EditorStatus {
+  Idle      = 'Idle',       // Initial state, before create() is called
+  OnCreate  = 'OnCreate',   // create() is running
+  Created   = 'Created',    // Editor is ready
+  OnDestroy = 'OnDestroy',  // destroy() is running
+  Destroyed = 'Destroyed',  // Editor has been torn down
+}
+```
+
+---
+
+## Internal slices
+
+These slices are injected by the core internal plugins and are available in `.action()` callbacks and plugin code after the relevant timer has resolved.
+
+<AccordionGroup>
+  <Accordion title="rootCtx">
+    ```typescript
+    const rootCtx: SliceType<Node | string | null | undefined, 'root'>
+    ```
+    The mount target for the editor. Accepts a DOM `Node`, a CSS selector string, or `null` (defaults to `document.body`). Set this in your `.config()` callback.
+
+    ```typescript
+    ctx.set(rootCtx, document.querySelector('#editor'))
+    ```
+  </Accordion>
+
+  <Accordion title="defaultValueCtx">
+    ```typescript
+    const defaultValueCtx: SliceType<DefaultValue, 'defaultValue'>
+    ```
+    The initial content of the editor. Accepts a markdown string, `{ type: 'html'; dom: HTMLElement }`, or `{ type: 'json'; value: JSONRecord }`.
+
+    ```typescript
+    ctx.set(defaultValueCtx, '# My document')
+    // or
+    ctx.set(defaultValueCtx, { type: 'json', value: docJSON })
+    ```
+  </Accordion>
+
+  <Accordion title="editorViewCtx">
+    ```typescript
+    const editorViewCtx: SliceType<EditorView, 'editorView'>
+    ```
+    The live ProseMirror `EditorView` instance. Available after `EditorViewReady`.
+
+    ```typescript
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx)
+      view.focus()
+    })
+    ```
+  </Accordion>
+
+  <Accordion title="schemaCtx">
+    ```typescript
+    const schemaCtx: SliceType<Schema, 'schema'>
+    ```
+    The ProseMirror `Schema` built from all registered nodes and marks. Available after `SchemaReady`.
+  </Accordion>
+
+  <Accordion title="parserCtx">
+    ```typescript
+    const parserCtx: SliceType<Parser, 'parser'>
+    ```
+    A function `(markdown: string) => Node` that converts markdown to a ProseMirror document. Available after `ParserReady`.
+  </Accordion>
+
+  <Accordion title="serializerCtx">
+    ```typescript
+    const serializerCtx: SliceType<Serializer, 'serializer'>
+    ```
+    A function `(doc: Node) => string` that converts a ProseMirror document to markdown. Available after `SerializerReady`.
+  </Accordion>
+
+  <Accordion title="commandsCtx">
+    ```typescript
+    const commandsCtx: SliceType<CommandManager, 'commands'>
+    ```
+    The `CommandManager` used to register, retrieve, and invoke ProseMirror commands by key. Available after `CommandsReady`.
+  </Accordion>
+
+  <Accordion title="prosePluginsCtx">
+    ```typescript
+    const prosePluginsCtx: SliceType<Plugin[], 'prosePlugins'>
+    ```
+    The array of ProseMirror `Plugin` instances that will be included in the editor state.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Internal timers
+
+Core timers are resolved in order. Each later timer waits for the earlier ones to complete.
+
+| Timer | Resolved when |
+|---|---|
+| `ConfigReady` | All `.config()` callbacks have run |
+| `InitReady` | Core slices are injected; remark instance is built |
+| `SchemaReady` | ProseMirror schema is constructed |
+| `ParserReady` | Markdown-to-document parser is ready |
+| `SerializerReady` | Document-to-markdown serializer is ready |
+| `CommandsReady` | Command manager is ready |
+| `KeymapReady` | Keymap manager is ready |
+| `EditorStateReady` | ProseMirror `EditorState` is created |
+| `EditorViewReady` | ProseMirror `EditorView` is mounted |
+
+---
+
+## CommandManager
+
+The `CommandManager` is stored in `commandsCtx` and manages all registered ProseMirror commands.
+
+```typescript
+class CommandManager {
+  create<T>(meta: CmdKey<T>, value: Cmd<T>): Slice<Cmd<T>>
+  get<T>(slice: CmdKey<T> | string): Cmd<T>
+  remove<T>(slice: CmdKey<T> | string): void
+  call<T>(slice: CmdKey<T> | string, payload?: T): boolean
+  inline(command: Command): boolean
+  chain(): CommandChain
+}
+```
+
+### CommandChain
+
+Chains multiple commands together, running each in order until one returns `true`.
+
+```typescript
+interface CommandChain {
+  pipe(slice: CmdKey<any> | string, payload?: any): CommandChain
+  inline(command: Command): CommandChain
+  run(): boolean
+}
+```
+
+### createCmdKey
+
+```typescript
+function createCmdKey<T = undefined>(key?: string): CmdKey<T>
+```
+
+Creates a typed command key (a `SliceType` wrapping a `Cmd<T>`).
+
+---
+
+## Complete setup example
+
+```typescript
+import { Editor, rootCtx, defaultValueCtx } from '@milkdown/core'
+import { commonmark } from '@milkdown/preset-commonmark'
+import { getMarkdown } from '@milkdown/utils'
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.set(rootCtx, document.querySelector('#editor'))
+    ctx.set(defaultValueCtx, '# Hello, Milkdown!')
+  })
+  .use(commonmark)
+  .create()
+
+// Read markdown after creation
+const md = editor.action(getMarkdown())
+```

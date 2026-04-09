@@ -1,0 +1,231 @@
+---
+title: "Link tooltip"
+description: "A hover and click tooltip for previewing and editing links, with a programmatic API for adding, editing, and removing links."
+---
+
+The `linkTooltipPlugin` provides two tooltip overlays for links in the editor:
+
+- **Preview tooltip** — appears on mouseover when the editor is focused. Shows the link URL with a copy button and an edit button.
+- **Edit tooltip** — opens when you click the edit button or call the programmatic API. Provides an input field to set or change the URL, plus a confirm and a remove button.
+
+<Note>
+  The component ships without any CSS. You must write your own styles to match your design.
+</Note>
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/components
+```
+
+```bash yarn
+yarn add @milkdown/components
+```
+
+```bash pnpm
+pnpm add @milkdown/components
+```
+
+</CodeGroup>
+
+## Exports
+
+| Name | Kind | Description |
+|------|------|-------------|
+| `linkTooltipPlugin` | `MilkdownPlugin[]` | Plugin array — pass to `.use()` |
+| `linkTooltipConfig` | `Ctx slice` | Config slice — update in `.config()` |
+| `linkTooltipAPI` | `Ctx slice` | Programmatic API slice |
+| `linkTooltipState` | `Ctx slice` | Internal state slice (mode: `preview` \| `edit`) |
+| `configureLinkTooltip` | `(ctx: Ctx) => void` | Required setup function — pass to `.config()` |
+| `toggleLinkCommand` | `MilkdownPlugin` | Command that toggles a link on the current selection |
+| `linkPreviewTooltip` | `MilkdownPlugin[]` | The preview tooltip plugin (included in `linkTooltipPlugin`) |
+| `linkEditTooltip` | `MilkdownPlugin[]` | The edit tooltip plugin (included in `linkTooltipPlugin`) |
+| `LinkTooltipConfig` | `interface` | TypeScript config type |
+| `LinkTooltipAPI` | `interface` | TypeScript API type |
+| `LinkToolTipState` | `interface` | TypeScript state type |
+
+## Basic usage
+
+You must call `configureLinkTooltip` in `.config()` and add `linkTooltipPlugin` via `.use()`.
+
+```typescript
+import {
+  configureLinkTooltip,
+  linkTooltipConfig,
+  linkTooltipPlugin,
+} from '@milkdown/components/link-tooltip'
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+
+const editor = await Editor.make()
+  .config(configureLinkTooltip)
+  .config((ctx) => {
+    ctx.update(linkTooltipConfig.key, (defaultConfig) => ({
+      ...defaultConfig,
+      onCopyLink: (link) => {
+        navigator.clipboard.writeText(link)
+      },
+    }))
+  })
+  .use(commonmark)
+  .use(linkTooltipPlugin)
+  .create()
+```
+
+<Warning>
+  `configureLinkTooltip` must be called in `.config()` before `.use(linkTooltipPlugin)`. Without it, neither tooltip will render.
+</Warning>
+
+## Configuration
+
+Update `linkTooltipConfig` inside `editor.config` to customize labels and behavior.
+
+```typescript
+editor.config((ctx) => {
+  ctx.update(linkTooltipConfig.key, (defaultConfig) => ({
+    ...defaultConfig,
+    // your overrides
+  }))
+})
+```
+
+### `LinkTooltipConfig` interface
+
+<ResponseField name="linkIcon" type="string" default='"🔗"'>
+  Icon shown in the preview tooltip. Clicking it copies the link URL and triggers `onCopyLink`.
+</ResponseField>
+
+<ResponseField name="editButton" type="string" default='"✎"'>
+  Label for the button in the preview tooltip that opens the edit tooltip.
+</ResponseField>
+
+<ResponseField name="removeButton" type="string" default='"⌫"'>
+  Label for the button in the edit tooltip that removes the link mark from the selection.
+</ResponseField>
+
+<ResponseField name="confirmButton" type="string" default='"Confirm ⏎"'>
+  Label for the submit button in the edit tooltip that applies the entered URL.
+</ResponseField>
+
+<ResponseField name="onCopyLink" type="(link: string) => void">
+  Callback triggered when the user clicks `linkIcon` in the preview tooltip. Receives the full href string. Defaults to a no-op — you must implement clipboard writing yourself.
+</ResponseField>
+
+<ResponseField name="inputPlaceholder" type="string" default='"Paste link..."'>
+  Placeholder text for the URL input in the edit tooltip.
+</ResponseField>
+
+## Programmatic API
+
+The `linkTooltipAPI` slice exposes three methods for controlling the tooltips from outside the editor.
+
+### `LinkTooltipAPI` interface
+
+<ResponseField name="addLink" type="(from: number, to: number) => void">
+  Opens the edit tooltip to add a new link over the given document range. Typically called on a text selection that does not already have a link.
+</ResponseField>
+
+<ResponseField name="editLink" type="(mark: Mark, from: number, to: number) => void">
+  Opens the edit tooltip pre-filled with the existing link's `href`. Pass the ProseMirror `Mark` object and the range it covers.
+</ResponseField>
+
+<ResponseField name="removeLink" type="(from: number, to: number) => void">
+  Removes the link mark from the given range without opening any tooltip.
+</ResponseField>
+
+### Add a link
+
+```typescript
+import { linkTooltipAPI, linkTooltipState } from '@milkdown/components/link-tooltip'
+import { linkSchema } from '@milkdown/kit/preset/commonmark'
+import { editorViewCtx } from '@milkdown/kit/core'
+import type { Ctx } from '@milkdown/ctx'
+
+function addLink(ctx: Ctx) {
+  const view = ctx.get(editorViewCtx)
+  const { selection, doc } = view.state
+
+  // Do nothing if the tooltip is already in edit mode
+  if (ctx.get(linkTooltipState.key).mode === 'edit') return
+
+  // Do nothing if the selection already contains a link
+  const hasLink = doc.rangeHasMark(
+    selection.from,
+    selection.to,
+    linkSchema.type(ctx)
+  )
+  if (hasLink) return
+
+  ctx.get(linkTooltipAPI.key).addLink(selection.from, selection.to)
+}
+```
+
+### Edit an existing link
+
+```typescript
+import { linkTooltipAPI } from '@milkdown/components/link-tooltip'
+import { linkSchema } from '@milkdown/kit/preset/commonmark'
+import { editorViewCtx } from '@milkdown/kit/core'
+import type { Ctx } from '@milkdown/ctx'
+
+function editLink(ctx: Ctx) {
+  const view = ctx.get(editorViewCtx)
+  const { selection } = view.state
+
+  const node = view.state.doc.nodeAt(selection.from)
+  if (!node) return
+
+  const mark = node.marks.find(
+    (m) => m.type === linkSchema.mark.type(ctx)
+  )
+  if (!mark) return
+
+  ctx.get(linkTooltipAPI.key).editLink(mark, selection.from, selection.to)
+}
+```
+
+### Remove a link
+
+```typescript
+import { linkTooltipAPI } from '@milkdown/components/link-tooltip'
+import { editorViewCtx } from '@milkdown/kit/core'
+import type { Ctx } from '@milkdown/ctx'
+
+function removeLink(ctx: Ctx) {
+  const view = ctx.get(editorViewCtx)
+  const { selection } = view.state
+
+  ctx.get(linkTooltipAPI.key).removeLink(selection.from, selection.to)
+}
+```
+
+## `toggleLinkCommand`
+
+The `toggleLinkCommand` (exported as `ToggleLink`) is included in `linkTooltipPlugin` and handles the common case of toggling a link on the current selection:
+
+- If the selection already has a link, it calls `removeLink`.
+- If it does not, it calls `addLink`.
+
+Call it using Milkdown's command dispatch:
+
+```typescript
+import { callCommand } from '@milkdown/utils'
+import { toggleLinkCommand } from '@milkdown/components/link-tooltip'
+
+editor.action(callCommand(toggleLinkCommand.key))
+```
+
+## Internal state
+
+The `linkTooltipState` slice tracks whether the tooltip is in `'preview'` or `'edit'` mode. Read it to avoid opening a duplicate tooltip when one is already active.
+
+```typescript
+import { linkTooltipState } from '@milkdown/components/link-tooltip'
+
+const state = ctx.get(linkTooltipState.key)
+if (state.mode === 'edit') {
+  // edit tooltip is open — do not open another
+}
+```

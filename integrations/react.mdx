@@ -1,0 +1,269 @@
+---
+title: "React"
+description: "Integrate Milkdown into a React application using MilkdownProvider, useEditor, and the Milkdown component."
+---
+
+The `@milkdown/react` package provides a set of React-specific primitives that manage the editor lifecycle and connect it to the DOM. The package is built around a context provider, a hook for configuring the editor, and a lightweight component for rendering the editor view.
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/react @milkdown/kit
+```
+
+```bash yarn
+yarn add @milkdown/react @milkdown/kit
+```
+
+```bash pnpm
+pnpm add @milkdown/react @milkdown/kit
+```
+
+</CodeGroup>
+
+`@milkdown/kit` is a convenience meta-package that re-exports the Milkdown core, presets, plugins, and utilities under sub-paths such as `@milkdown/kit/core`, `@milkdown/kit/preset/commonmark`, and `@milkdown/kit/plugin/listener`.
+
+## Core API
+
+The React integration exposes four things from `@milkdown/react`:
+
+| Export | Type | Description |
+| --- | --- | --- |
+| `MilkdownProvider` | Component | Context provider — wrap your app or page with this |
+| `Milkdown` | Component | Renders the editor DOM node |
+| `useEditor` | Hook | Registers the editor factory and returns loading state |
+| `useInstance` | Hook | Accesses the live `Editor` instance after creation |
+
+### MilkdownProvider
+
+`MilkdownProvider` holds shared state for the editor instance and must be an ancestor of both `useEditor` and the `Milkdown` component.
+
+```tsx
+import { MilkdownProvider } from '@milkdown/react'
+
+export default function App() {
+  return (
+    <MilkdownProvider>
+      <YourEditor />
+    </MilkdownProvider>
+  )
+}
+```
+
+### useEditor
+
+`useEditor` accepts a factory function that receives the root `HTMLElement` and returns a configured `Editor` instance. Call it inside a component that is a descendant of `MilkdownProvider`.
+
+```typescript
+function useEditor(
+  getEditor: (container: HTMLElement) => Editor | undefined,
+  deps?: DependencyList
+): UseEditorReturn
+```
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `loading` | `boolean` | `true` while the editor is being created |
+| `get` | `() => Editor \| undefined` | Returns the editor instance once ready |
+
+The factory function runs whenever `deps` changes — the same rules as `useCallback`.
+
+### Milkdown
+
+`Milkdown` is a zero-config component that renders a `<div data-milkdown-root>` and attaches the editor view to it. Place it anywhere inside `MilkdownProvider`.
+
+```tsx
+import { Milkdown } from '@milkdown/react'
+
+function YourEditor() {
+  // ...
+  return <Milkdown />
+}
+```
+
+### useInstance
+
+`useInstance` gives you access to the live `Editor` instance for programmatic operations such as reading content or dispatching actions.
+
+```typescript
+function useInstance(): [loading: boolean, getInstance: () => Editor | undefined]
+```
+
+When `loading` is `true`, `getInstance()` returns `undefined`. Wait for `loading` to become `false` before calling `editor.action(...)`.
+
+## Getting markdown content
+
+Use `plugin-listener` from `@milkdown/kit/plugin/listener` to subscribe to document changes.
+
+```tsx
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
+import { defaultValueCtx, rootCtx } from '@milkdown/kit/core'
+import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
+
+function MarkdownEditor({ onChange }: { onChange: (md: string) => void }) {
+  useEditor((root) =>
+    Editor.make()
+      .config((ctx) => {
+        ctx.set(rootCtx, root)
+        ctx.set(defaultValueCtx, '# Hello, Milkdown!')
+        ctx.get(listenerCtx).markdownUpdated((_, markdown) => {
+          onChange(markdown)
+        })
+      })
+      .use(commonmark)
+      .use(listener)
+  )
+
+  return <Milkdown />
+}
+
+export default function App() {
+  return (
+    <MilkdownProvider>
+      <MarkdownEditor onChange={(md) => console.log(md)} />
+    </MilkdownProvider>
+  )
+}
+```
+
+<Note>
+`listenerCtx` is a slice — retrieve it with `ctx.get(listenerCtx)` inside a `config` callback, then chain listener methods on the returned `ListenerManager`.
+</Note>
+
+## Setting markdown content
+
+To replace the editor's content programmatically after creation, use `editor.action` with the `replaceAll` utility.
+
+```tsx
+import { replaceAll } from '@milkdown/kit/utils'
+import { useInstance } from '@milkdown/react'
+
+function Toolbar() {
+  const [loading, getInstance] = useInstance()
+
+  function handleReset() {
+    if (loading) return
+    getInstance()?.action(replaceAll('# New content\n\nReplaced!'))
+  }
+
+  return (
+    <button onClick={handleReset} disabled={loading}>
+      Reset content
+    </button>
+  )
+}
+```
+
+`replaceAll` is imported from `@milkdown/kit/utils` and returns an action thunk that is passed directly to `editor.action`.
+
+## Full example
+
+The following component wires together the provider, editor configuration, content listener, and a button that resets the content.
+
+```tsx
+import { defaultValueCtx, rootCtx } from '@milkdown/kit/core'
+import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { Editor } from '@milkdown/kit/core'
+import { replaceAll } from '@milkdown/kit/utils'
+import {
+  Milkdown,
+  MilkdownProvider,
+  useEditor,
+  useInstance,
+} from '@milkdown/react'
+import { useCallback, useState } from 'react'
+
+const INITIAL_VALUE = '# Hello, Milkdown!\n\nStart typing…'
+
+function EditorInner({ onUpdate }: { onUpdate: (md: string) => void }) {
+  useEditor((root) =>
+    Editor.make()
+      .config((ctx) => {
+        ctx.set(rootCtx, root)
+        ctx.set(defaultValueCtx, INITIAL_VALUE)
+        ctx.get(listenerCtx).markdownUpdated((_, markdown) => {
+          onUpdate(markdown)
+        })
+      })
+      .use(commonmark)
+      .use(listener)
+  )
+
+  return <Milkdown />
+}
+
+function ResetButton() {
+  const [loading, getInstance] = useInstance()
+
+  const handleReset = useCallback(() => {
+    if (loading) return
+    getInstance()?.action(replaceAll(INITIAL_VALUE))
+  }, [loading, getInstance])
+
+  return (
+    <button onClick={handleReset} disabled={loading}>
+      Reset
+    </button>
+  )
+}
+
+export default function MarkdownEditorPage() {
+  const [markdown, setMarkdown] = useState(INITIAL_VALUE)
+
+  return (
+    <MilkdownProvider>
+      <EditorInner onUpdate={setMarkdown} />
+      <ResetButton />
+      <pre>{markdown}</pre>
+    </MilkdownProvider>
+  )
+}
+```
+
+## TypeScript types
+
+All types are exported from `@milkdown/react`:
+
+```typescript
+import type { GetEditor, UseEditorReturn } from '@milkdown/react'
+
+// GetEditor — the factory function signature
+type GetEditor = (container: HTMLElement) => Editor | undefined
+
+// UseEditorReturn — returned by useEditor
+interface UseEditorReturn {
+  readonly loading: boolean
+  readonly get: () => Editor | undefined
+}
+
+// Instance — tuple returned by useInstance
+type Instance = [true, () => undefined] | [false, () => Editor]
+```
+
+`Editor` itself is exported from `@milkdown/kit/core`.
+
+## Re-rendering and deps
+
+Pass a `deps` array as the second argument to `useEditor` when the factory depends on React state or props. The editor is destroyed and recreated whenever any dep changes.
+
+```tsx
+useEditor(
+  (root) =>
+    Editor.make()
+      .config((ctx) => {
+        ctx.set(rootCtx, root)
+        ctx.set(defaultValueCtx, initialValue) // reactive prop
+      })
+      .use(commonmark),
+  [initialValue] // editor recreates when initialValue changes
+)
+```
+
+<Warning>
+Recreating the editor on every render is expensive. Only include values in `deps` that genuinely require a full editor restart.
+</Warning>

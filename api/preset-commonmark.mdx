@@ -1,0 +1,304 @@
+---
+title: preset-commonmark
+description: CommonMark preset for Milkdown — nodes, marks, commands, input rules, and keymaps for standard Markdown.
+---
+
+The `@milkdown/preset-commonmark` package implements the [CommonMark specification](https://spec.commonmark.org/) for Milkdown. It registers all standard Markdown nodes and marks, along with their input rules, commands, and keyboard shortcuts.
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/preset-commonmark
+```
+
+```bash yarn
+yarn add @milkdown/preset-commonmark
+```
+
+```bash pnpm
+pnpm add @milkdown/preset-commonmark
+```
+
+</CodeGroup>
+
+## Usage
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+
+Editor.make().use(commonmark).create()
+```
+
+### `commonmark`
+
+The main export. An array of `MilkdownPlugin` values that registers the full CommonMark feature set: schema, input rules, mark input rules, commands, keymap, and prose plugins.
+
+```typescript
+import type { MilkdownPlugin } from '@milkdown/ctx'
+
+export const commonmark: MilkdownPlugin[]
+```
+
+---
+
+## Nodes
+
+### Doc
+
+`docSchema` — root document node. Every editor document is a `doc` containing `block+` content.
+
+### Text
+
+`textSchema` — raw text leaf node.
+
+### Paragraph
+
+`paragraphAttr` — configures HTML attributes on `<p>` elements.
+
+`paragraphSchema` — block node schema for paragraphs.
+
+`turnIntoTextCommand` — converts the current block to a plain paragraph.
+
+`paragraphKeymap` — registers `Mod-Shift-0` to run `turnIntoTextCommand`.
+
+### Heading
+
+`headingAttr` — configures HTML attributes on heading elements.
+
+`headingSchema` — block node with a `level` attribute (`1`–`6`) and an auto-generated `id`.
+
+`headingIdGenerator` — a configurable slice (`$ctx`) that holds the function used to generate heading IDs. The default derives the ID from the heading's text content.
+
+```typescript
+// Override the ID generator
+ctx.set(headingIdGenerator.key, (node) => myCustomIdFn(node))
+```
+
+`wrapInHeadingInputRule` — triggers when you type `# `, `## `, … `###### ` at the start of a block.
+
+`wrapInHeadingCommand` — accepts an optional `level: number` (defaults to `1`). Passing `0` or a negative number converts the block back to a paragraph.
+
+`downgradeHeadingCommand` — decrements the heading level by one. If already at `h1`, converts to a paragraph.
+
+`headingKeymap`:
+
+| Shortcut | Action |
+| --- | --- |
+| `Mod-Alt-1` | Turn into `h1` |
+| `Mod-Alt-2` | Turn into `h2` |
+| `Mod-Alt-3` | Turn into `h3` |
+| `Mod-Alt-4` | Turn into `h4` |
+| `Mod-Alt-5` | Turn into `h5` |
+| `Mod-Alt-6` | Turn into `h6` |
+| `Delete` / `Backspace` | Downgrade heading |
+
+### Blockquote
+
+`blockquoteAttr` — configures HTML attributes on `<blockquote>` elements.
+
+`blockquoteSchema` — block node that wraps `block+` content.
+
+`wrapInBlockquoteInputRule` — triggers on `> ` at the start of a line.
+
+`wrapInBlockquoteCommand` — wraps the current selection in a blockquote.
+
+`blockquoteKeymap` — registers `Mod-Shift->` to run `wrapInBlockquoteCommand`.
+
+### Ordered list
+
+`orderedListAttr` — configures HTML attributes on `<ol>` elements.
+
+`orderedListSchema` — block node for ordered lists.
+
+`wrapInOrderedListInputRule` — triggers on `1. ` at the start of a line.
+
+`wrapInOrderedListCommand` — wraps the current selection in an ordered list.
+
+`orderedListKeymap` — registers `Mod-Shift-7` to run `wrapInOrderedListCommand`.
+
+### Bullet list
+
+`bulletListAttr` — configures HTML attributes on `<ul>` elements.
+
+`bulletListSchema` — block node for unordered lists.
+
+`wrapInBulletListInputRule` — triggers on `* `, `- `, or `+ ` at the start of a line.
+
+`wrapInBulletListCommand` — wraps the current selection in a bullet list.
+
+`bulletListKeymap` — registers `Mod-Shift-8` to run `wrapInBulletListCommand`.
+
+### List item
+
+`listItemAttr` — configures HTML attributes on `<li>` elements.
+
+`listItemSchema` — block node for list items.
+
+`sinkListItemCommand` — indents the current list item.
+
+`liftListItemCommand` — outdents the current list item.
+
+`splitListItemCommand` — splits the current list item on Enter.
+
+`liftFirstListItemCommand` — lifts the first item out of a list.
+
+`listItemKeymap`:
+
+| Shortcut | Action |
+| --- | --- |
+| `Tab` | Sink (indent) list item |
+| `Shift-Tab` | Lift (outdent) list item |
+| `Enter` | Split list item |
+| `Mod-[` | Lift list item |
+
+### Code block
+
+`codeBlockAttr` — configures HTML attributes on `<pre>` / `<code>` elements.
+
+`codeBlockSchema` — block node with a `language` attribute.
+
+`createCodeBlockInputRule` — triggers on ` ``` ` followed by an optional language name.
+
+`createCodeBlockCommand` — inserts a new code block.
+
+`updateCodeBlockLanguageCommand` — accepts a `language: string` payload and updates the language attribute of the selected code block.
+
+`codeBlockKeymap` — registers `Mod-Alt-c` to create a code block.
+
+### Hard break
+
+`hardbreakAttr` — configures HTML attributes on `<br>` elements.
+
+`hardbreakSchema` — inline node for a hard line break.
+
+`insertHardbreakCommand` — inserts a hard break at the cursor.
+
+`hardbreakKeymap` — registers `Shift-Enter` to insert a hard break.
+
+### Horizontal rule
+
+`hrAttr` — configures HTML attributes on `<hr>` elements.
+
+`hrSchema` — block node for a thematic break.
+
+`insertHrInputRule` — triggers on `---` or `***` at the start of a line.
+
+`insertHrCommand` — inserts a horizontal rule at the cursor.
+
+### Image
+
+`imageAttr` — configures HTML attributes on `<img>` elements.
+
+`imageSchema` — inline, atom node with `src`, `alt`, and `title` attributes.
+
+`insertImageInputRule` — triggers on `![alt](src "title")` syntax.
+
+`insertImageCommand` — accepts an optional `{ src, alt, title }` payload and inserts an image node.
+
+`updateImageCommand` — accepts a partial `{ src?, alt?, title? }` payload and updates the selected image.
+
+### HTML
+
+`htmlAttr` — configures HTML attributes for raw HTML nodes.
+
+`htmlSchema` — block node for raw HTML pass-through.
+
+---
+
+## Marks
+
+### Emphasis (italic)
+
+`emphasisAttr` — configures HTML attributes on `<em>` elements.
+
+`emphasisSchema` — mark with a `marker` attribute (`*` or `_`).
+
+`toggleEmphasisCommand` — toggles italic on the current selection.
+
+`emphasisStarInputRule` — triggers on `*text*`.
+
+`emphasisUnderscoreInputRule` — triggers on `_text_`.
+
+`emphasisKeymap` — registers `Mod-i` to toggle emphasis.
+
+### Strong (bold)
+
+`strongAttr` — configures HTML attributes on `<strong>` elements.
+
+`strongSchema` — mark with a `marker` attribute (`*` or `_`).
+
+`toggleStrongCommand` — toggles bold on the current selection.
+
+`strongInputRule` — triggers on `**text**` or `__text__`.
+
+`strongKeymap` — registers `Mod-b` to toggle strong.
+
+### Inline code
+
+`inlineCodeAttr` — configures HTML attributes on `<code>` elements.
+
+`inlineCodeSchema` — mark for inline code spans.
+
+`toggleInlineCodeCommand` — toggles inline code on the current selection.
+
+`inlineCodeInputRule` — triggers on `` `text` ``.
+
+`inlineCodeKeymap` — registers `` Mod-` `` to toggle inline code.
+
+### Link
+
+`linkAttr` — configures HTML attributes on `<a>` elements.
+
+`linkSchema` — mark with `href` (required) and optional `title` attributes.
+
+`toggleLinkCommand` — accepts an optional `{ href?, title? }` payload and toggles the link mark.
+
+`updateLinkCommand` — updates `href` and/or `title` of the link mark at the cursor position.
+
+---
+
+## Utility commands
+
+These commands are lower-level building blocks for use in custom plugins and toolbars.
+
+| Command | Description |
+| --- | --- |
+| `isMarkSelectedCommand` | Returns `true` if the given `MarkType` is active in the current selection. |
+| `isNodeSelectedCommand` | Returns `true` if the given `NodeType` is present in the current selection. |
+| `clearTextInCurrentBlockCommand` | Deletes all text content in the current block. |
+| `setBlockTypeCommand` | Accepts `{ nodeType, attrs? }` and converts the current block to the given type. |
+| `wrapInBlockTypeCommand` | Accepts `{ nodeType, attrs? }` and wraps the current selection in the given node type. |
+| `addBlockTypeCommand` | Accepts `{ nodeType, attrs? }` and inserts a new node of the given type at the cursor. |
+| `selectTextNearPosCommand` | Accepts `{ pos }` and moves the text selection to the nearest text position near `pos`. |
+
+---
+
+## Configuration example
+
+Use `ctx.set` inside `.config()` to customise node attributes or the heading ID generator:
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import {
+  commonmark,
+  paragraphAttr,
+  headingIdGenerator,
+} from '@milkdown/kit/preset/commonmark'
+import { v4 as uuid } from 'uuid'
+
+Editor.make()
+  .config((ctx) => {
+    // Add a data attribute to every paragraph
+    ctx.set(paragraphAttr.key, () => ({
+      'data-block': 'paragraph',
+    }))
+
+    // Use UUIDs as heading IDs
+    ctx.set(headingIdGenerator.key, (_node) => uuid())
+  })
+  .use(commonmark)
+  .create()
+```

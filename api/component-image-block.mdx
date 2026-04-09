@@ -1,0 +1,234 @@
+---
+title: "Image block"
+description: "A block-level image component with resize handles, caption, upload integration, and URL proxying."
+---
+
+The `imageBlockComponent` renders standalone images as block-level nodes rather than inline elements. In standard Markdown, a paragraph containing only an image is converted to an `image-block` node, which this component handles with a rich editing UI.
+
+Features include:
+
+- Drag-to-resize handle that maintains aspect ratio
+- Editable image caption
+- File upload via a configurable `onUpload` handler
+- Paste-a-URL input field
+- Optional URL proxy for authentication or CDN rewrites
+- Optional error callback for failed image loads
+- Optional max-width and max-height constraints
+
+<Note>
+  The component ships without any CSS. You must write your own styles to match your design.
+</Note>
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/components
+```
+
+```bash yarn
+yarn add @milkdown/components
+```
+
+```bash pnpm
+pnpm add @milkdown/components
+```
+
+</CodeGroup>
+
+## Exports
+
+| Name | Kind | Description |
+|------|------|-------------|
+| `imageBlockComponent` | `MilkdownPlugin[]` | Plugin array — pass to `.use()` |
+| `imageBlockConfig` | `Ctx slice` | Config slice — update in `.config()` |
+| `imageBlockSchema` | `$nodeSchema` | ProseMirror node schema for `image-block` |
+| `remarkImageBlockPlugin` | `$remark` | Remark plugin that converts solo-image paragraphs to `image-block` nodes |
+| `imageBlockView` | `MilkdownPlugin` | The raw node view plugin |
+| `ImageBlockConfig` | `interface` | TypeScript config type |
+
+## Basic usage
+
+```typescript
+import {
+  imageBlockComponent,
+  imageBlockConfig,
+} from '@milkdown/components/image-block'
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+
+await Editor.make()
+  .config((ctx) => {
+    ctx.update(imageBlockConfig.key, (defaultConfig) => ({
+      ...defaultConfig,
+      onUpload: async (file) => {
+        const url = await uploadToYourServer(file)
+        return url
+      },
+    }))
+  })
+  .use(commonmark)
+  .use(imageBlockComponent)
+  .create()
+```
+
+## How it works
+
+The `remarkImageBlockPlugin` runs during Markdown parsing. Any paragraph that contains exactly one image is converted to an `image-block` node. The `imageBlockSchema` defines this node with three attributes:
+
+| Attribute | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `src` | `string` | `""` | Image URL (sanitized with DOMPurify on write) |
+| `caption` | `string` | `""` | Caption text shown below the image |
+| `ratio` | `number` | `1` | Aspect ratio used to maintain proportions during resize |
+
+When serialized back to Markdown, the node is written as a standard `![ratio](url "caption")` image inside a paragraph.
+
+## Configuration
+
+Update `imageBlockConfig` inside `editor.config` to customize the component.
+
+```typescript
+editor.config((ctx) => {
+  ctx.update(imageBlockConfig.key, (defaultConfig) => ({
+    ...defaultConfig,
+    // your overrides
+  }))
+})
+```
+
+### `ImageBlockConfig` interface
+
+<ResponseField name="imageIcon" type="string | undefined" default='"🌌"'>
+  Icon displayed in the empty image placeholder before an image is added.
+</ResponseField>
+
+<ResponseField name="captionIcon" type="string | undefined" default='"💬"'>
+  Icon on the button that toggles the caption input.
+</ResponseField>
+
+<ResponseField name="uploadButton" type="string | undefined" default='"Upload file"'>
+  Label on the file-picker upload button.
+</ResponseField>
+
+<ResponseField name="confirmButton" type="string | undefined" default='"Confirm ⏎"'>
+  Label on the button that confirms a pasted URL.
+</ResponseField>
+
+<ResponseField name="uploadPlaceholderText" type="string" default='"or paste the image link ..."'>
+  Placeholder text in the URL input field shown alongside the upload button.
+</ResponseField>
+
+<ResponseField name="captionPlaceholderText" type="string" default='"Image caption"'>
+  Placeholder text inside the caption input.
+</ResponseField>
+
+<ResponseField name="onUpload" type="(file: File) => Promise<string>" required>
+  Called when the user selects a file via the upload button. Must return a `Promise` that resolves to the image URL to store in the document.
+
+  The default implementation calls `URL.createObjectURL(file)`, which creates a temporary object URL. Replace this with a real upload handler in production.
+</ResponseField>
+
+<ResponseField name="proxyDomURL" type="(url: string) => Promise<string> | string">
+  Optional function to rewrite the stored `src` URL before rendering the `<img>` tag. Useful for authenticated CDN URLs or CORS workarounds. Can return a string or a `Promise<string>`. Only affects rendering, not the stored document value.
+</ResponseField>
+
+<ResponseField name="onImageLoadError" type="(event: Event) => void | Promise<void>">
+  Optional callback invoked when the browser fires an `error` event on the `<img>` element (invalid URL, 404, CORS failure, etc.). Can be sync or async.
+</ResponseField>
+
+<ResponseField name="maxWidth" type="number">
+  Optional maximum display width in pixels. Images wider than this are scaled down while maintaining aspect ratio. The constraint also applies during drag-to-resize.
+</ResponseField>
+
+<ResponseField name="maxHeight" type="number">
+  Optional maximum display height in pixels. Images taller than this are scaled down while maintaining aspect ratio.
+</ResponseField>
+
+## Configuration examples
+
+### Upload handler
+
+```typescript
+import { imageBlockConfig } from '@milkdown/components/image-block'
+
+ctx.update(imageBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  onUpload: async (file: File) => {
+    const formData = new FormData()
+    formData.append('image', file)
+
+    const response = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData,
+    })
+    const { url } = await response.json()
+    return url
+  },
+}))
+```
+
+### URL proxy
+
+```typescript
+import { imageBlockConfig } from '@milkdown/components/image-block'
+
+// Synchronous rewrite
+ctx.update(imageBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  proxyDomURL: (originalURL) => `https://cdn.example.com/proxy?url=${encodeURIComponent(originalURL)}`,
+}))
+
+// Asynchronous rewrite (e.g. signed URLs)
+ctx.update(imageBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  proxyDomURL: async (originalURL) => {
+    const response = await fetch(`/api/sign-url?url=${encodeURIComponent(originalURL)}`)
+    const { signedUrl } = await response.json()
+    return signedUrl
+  },
+}))
+```
+
+### Error handling
+
+```typescript
+import { imageBlockConfig } from '@milkdown/components/image-block'
+
+ctx.update(imageBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  onImageLoadError: async (event: Event) => {
+    console.error('Image failed to load', event)
+    await reportError('image_load_error', event)
+  },
+}))
+```
+
+### Size constraints
+
+```typescript
+import { imageBlockConfig } from '@milkdown/components/image-block'
+
+ctx.update(imageBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  maxWidth: 800,
+  maxHeight: 600,
+}))
+```
+
+### Custom UI strings
+
+```typescript
+import { imageBlockConfig } from '@milkdown/components/image-block'
+
+ctx.update(imageBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  imageIcon: '🖼️',
+  captionIcon: '📝',
+  uploadButton: 'Upload image',
+  confirmButton: 'Confirm',
+  uploadPlaceholderText: 'or paste an image URL',
+  captionPlaceholderText: 'Add a caption',
+}))
+```

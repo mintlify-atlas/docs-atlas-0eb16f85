@@ -1,24 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Milkdown",
+  "projectType": "framework",
+  "projectName": "Milkdown",
+  "projectDescription": "A plugin-driven WYSIWYG markdown editor framework built on ProseMirror and remark, with a rich plugin ecosystem and framework integrations for React and Vue.",
   "theme": "willow",
-  "colors": {
-    "primary": "#84a2c1",
-    "light": "#4c556c",
-    "dark": "#d8daea"
-  },
-  "favicon": "https://media.brand.dev/812131f2-154a-4a8a-987d-d4cea4937738.svg",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/Milkdown/milkdown"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/Milkdown/milkdown"
-    }
-  },
+  "primaryColor": "#84a2c1",
+  "lightColor": "#4c556c",
+  "darkColor": "#d8daea",
   "navigation": {
     "tabs": [
       {
@@ -112,5 +99,35 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Plugin-driven architecture built on ProseMirror and remark",
+    "WYSIWYG markdown editing with live preview",
+    "Crepe — a ready-to-use editor with sensible defaults",
+    "React and Vue integrations via official packages",
+    "GFM (GitHub Flavored Markdown) and CommonMark support",
+    "Real-time collaborative editing via Yjs",
+    "Slash commands, block editing, and rich toolbar",
+    "Code blocks with syntax highlighting via CodeMirror",
+    "LaTeX / KaTeX math formula support",
+    "Streaming AI input with progressive rendering",
+    "Customizable themes and components"
+  ],
+  "publicApiSurface": [
+    "Editor.make() — creates a new editor instance",
+    "Editor#use(plugins) — registers plugins",
+    "Editor#config(fn) — configures the editor context",
+    "Editor#create() — mounts and initializes the editor",
+    "Editor#destroy() — tears down the editor",
+    "Editor#action(fn) — runs an action against the editor ctx",
+    "Crepe — high-level editor class wrapping core Editor",
+    "CrepeFeature — enum of all optional Crepe features",
+    "listenerCtx / listener — event subscription plugin",
+    "commonmarkPreset — preset for CommonMark support",
+    "gfmPreset — preset for GitHub Flavored Markdown",
+    "@milkdown/react: useEditor, MilkdownProvider, Milkdown",
+    "@milkdown/vue: useEditor, MilkdownEditor",
+    "createSlice / createTimer — ctx primitives for plugin authors",
+    "MilkdownPlugin — base type for all plugins"
+  ]
 }

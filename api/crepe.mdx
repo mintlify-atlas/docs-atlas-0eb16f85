@@ -1,0 +1,385 @@
+---
+title: "Crepe"
+description: "API reference for the @milkdown/crepe package — the Crepe class, CrepeBuilder, and supporting utilities."
+---
+
+The `@milkdown/crepe` package provides two ways to create a fully-featured Milkdown editor: the high-level `Crepe` class (all features, zero configuration required) and the lower-level `CrepeBuilder` (add only what you need, better tree-shaking).
+
+## Installation
+
+```bash
+npm install @milkdown/crepe
+```
+
+## CSS imports
+
+Import the base styles and one theme before mounting the editor.
+
+```typescript
+// Base styles (required)
+import '@milkdown/crepe/theme/common/style.css'
+
+// Pick one theme
+import '@milkdown/crepe/theme/classic.css'       // default light
+import '@milkdown/crepe/theme/classic-dark.css'  // default dark
+import '@milkdown/crepe/theme/nord.css'
+import '@milkdown/crepe/theme/nord-dark.css'
+import '@milkdown/crepe/theme/frame.css'
+import '@milkdown/crepe/theme/frame-dark.css'
+```
+
+When using `CrepeBuilder` to load individual features, import per-feature stylesheets instead:
+
+```typescript
+import '@milkdown/crepe/theme/common/prosemirror.css'
+import '@milkdown/crepe/theme/common/reset.css'
+import '@milkdown/crepe/theme/common/block-edit.css'
+import '@milkdown/crepe/theme/common/toolbar.css'
+import '@milkdown/crepe/theme/common/top-bar.css'
+// … other feature stylesheets as needed
+import '@milkdown/crepe/theme/classic.css'
+```
+
+---
+
+## `Crepe` class
+
+The `Crepe` class is the recommended entry point. It extends `CrepeBuilder` and registers all features for you, merging user options with the built-in defaults.
+
+```typescript
+import { Crepe } from '@milkdown/crepe'
+
+const crepe = new Crepe({
+  root: '#editor',
+  defaultValue: '# Hello, Milkdown',
+})
+
+await crepe.create()
+```
+
+### Constructor
+
+```typescript
+new Crepe(config?: CrepeConfig)
+```
+
+Constructing a `Crepe` instance configures and registers all enabled features but does **not** mount the editor. Call `.create()` to mount.
+
+### `Crepe.Feature`
+
+A static alias for the [`CrepeFeature`](/api/crepe-features#crepefeature-enum) enum, so you can reference feature flags without a separate import:
+
+```typescript
+Crepe.Feature.CodeMirror   // 'code-mirror'
+Crepe.Feature.Toolbar      // 'toolbar'
+// …
+```
+
+---
+
+## `CrepeConfig` interface
+
+<ParamField path="root" type="Node | string | null">
+  The DOM element (or CSS selector) to mount the editor into. Accepts a `Node`, a selector string such as `'#editor'`, or `null`. When omitted the editor appends to `document.body`.
+</ParamField>
+
+<ParamField path="defaultValue" type="DefaultValue">
+  Initial markdown content. `DefaultValue` is the union type accepted by the underlying Milkdown `defaultValueCtx` slice — in practice a plain markdown string covers most use cases.
+</ParamField>
+
+<ParamField path="features" type="Partial<Record<CrepeFeature, boolean>>">
+  Override the default enabled/disabled state for individual features. Merges with [`defaultFeatures`](/api/crepe-features#default-feature-states) — you only need to specify the features you want to change.
+
+  ```typescript
+  features: {
+    [Crepe.Feature.TopBar]: true,      // enable (off by default)
+    [Crepe.Feature.Placeholder]: false, // disable
+  }
+  ```
+</ParamField>
+
+<ParamField path="featureConfigs" type="CrepeFeatureConfig">
+  Per-feature configuration objects. Keys are `CrepeFeature` enum values; values are the typed config for that feature. See [Crepe features](/api/crepe-features) for every feature's config interface.
+
+  ```typescript
+  featureConfigs: {
+    [Crepe.Feature.Placeholder]: {
+      text: 'Start writing…',
+      mode: 'block',
+    },
+    [Crepe.Feature.CodeMirror]: {
+      searchPlaceholder: 'Search language',
+    },
+  }
+  ```
+</ParamField>
+
+### Full type definition
+
+```typescript
+interface CrepeConfig extends CrepeBuilderConfig {
+  features?: Partial<Record<CrepeFeature, boolean>>
+  featureConfigs?: CrepeFeatureConfig
+}
+
+interface CrepeBuilderConfig {
+  root?: Node | string | null
+  defaultValue?: DefaultValue
+}
+```
+
+---
+
+## `CrepeBuilder` class
+
+`CrepeBuilder` is the base class of `Crepe`. Use it directly when you want to add features individually to reduce your bundle size.
+
+```typescript
+import { CrepeBuilder } from '@milkdown/crepe'
+// or from the sub-path for better tree-shaking:
+import { CrepeBuilder } from '@milkdown/crepe/builder'
+
+import { blockEdit } from '@milkdown/crepe/feature/block-edit'
+import { toolbar } from '@milkdown/crepe/feature/toolbar'
+
+const builder = new CrepeBuilder({
+  root: '#editor',
+  defaultValue: '# Hello',
+})
+
+builder.addFeature(blockEdit).addFeature(toolbar)
+
+await builder.create()
+```
+
+### Methods
+
+<ResponseField name="addFeature" type="(feature, config?) => CrepeBuilder">
+  Register a feature plugin on the editor. Returns `this` for chaining.
+
+  ```typescript
+  builder
+    .addFeature(blockEdit, { handleAddIcon: '<svg>…</svg>' })
+    .addFeature(toolbar)
+  ```
+</ResponseField>
+
+<ResponseField name="create" type="() => Promise<Editor>">
+  Mount the editor into the DOM and return the underlying `Editor` instance. You must call this before calling any methods that interact with editor content.
+
+  ```typescript
+  await builder.create()
+  ```
+</ResponseField>
+
+<ResponseField name="destroy" type="() => Promise<void>">
+  Unmount the editor and clean up all resources.
+
+  ```typescript
+  await builder.destroy()
+  ```
+</ResponseField>
+
+<ResponseField name="getMarkdown" type="() => string">
+  Return the current editor content serialized as a markdown string.
+
+  ```typescript
+  const md = builder.getMarkdown()
+  ```
+</ResponseField>
+
+<ResponseField name="setReadonly" type="(value: boolean) => CrepeBuilder">
+  Toggle read-only mode. When `true` the editor view becomes non-editable. Returns `this` for chaining.
+
+  ```typescript
+  builder.setReadonly(true)
+  ```
+
+  <Note>
+    You can call `setReadonly` before or after `.create()`. When called before creation the setting is applied when the editor mounts; when called after it updates the view immediately.
+  </Note>
+</ResponseField>
+
+<ResponseField name="readonly" type="boolean (getter)">
+  Returns `true` when the editor is in read-only mode.
+
+  ```typescript
+  if (builder.readonly) {
+    console.log('Editor is read-only')
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="editor" type="Editor (getter)">
+  The underlying Milkdown `Editor` instance. Use this to call `.action()` or access ctx slices directly when you need lower-level control.
+
+  ```typescript
+  builder.editor.action((ctx) => {
+    // interact with ctx slices
+  })
+  ```
+</ResponseField>
+
+<ResponseField name="on" type="(fn: (api: ListenerManager) => void) => CrepeBuilder">
+  Subscribe to editor events via the `ListenerManager` API. Can be called before or after `.create()`. Returns `this` for chaining.
+
+  ```typescript
+  builder.on((listener) => {
+    listener.markdownUpdated((ctx, markdown, prevMarkdown) => {
+      console.log('content changed', markdown)
+    })
+  })
+  ```
+
+  Common listener methods available on `ListenerManager`:
+
+  | Method | Description |
+  |---|---|
+  | `markdownUpdated(fn)` | Fires when the markdown output changes. |
+  | `focus(fn)` | Fires when the editor gains focus. |
+  | `blur(fn)` | Fires when the editor loses focus. |
+  | `mounted(fn)` | Fires once when the editor finishes mounting. |
+  | `destroy(fn)` | Fires when the editor is destroyed. |
+</ResponseField>
+
+---
+
+## Plugin context utilities
+
+Use these inside Milkdown plugins to access the Crepe instance or check enabled features.
+
+### `useCrepe(ctx)`
+
+Returns the `CrepeBuilder` instance from within a Milkdown plugin.
+
+```typescript
+import { useCrepe } from '@milkdown/crepe'
+
+const myPlugin = (ctx: Ctx) => {
+  return () => {
+    const crepe = useCrepe(ctx)
+    crepe.setReadonly(true)
+  }
+}
+```
+
+### `useCrepeFeatures(ctx)`
+
+Returns the slice holding the array of enabled `CrepeFeature` values.
+
+```typescript
+import { useCrepeFeatures } from '@milkdown/crepe'
+
+const myPlugin = (ctx: Ctx) => {
+  const featuresSlice = useCrepeFeatures(ctx)
+  const enabled = featuresSlice.get()
+
+  if (enabled.includes(CrepeFeature.CodeMirror)) {
+    // CodeMirror is active
+  }
+}
+```
+
+---
+
+## Complete usage examples
+
+### Basic editor
+
+```typescript
+import { Crepe } from '@milkdown/crepe'
+import '@milkdown/crepe/theme/common/style.css'
+import '@milkdown/crepe/theme/classic.css'
+
+const crepe = new Crepe({
+  root: document.getElementById('editor'),
+  defaultValue: '# Hello, Milkdown\n\nStart writing…',
+})
+
+await crepe.create()
+```
+
+### Configuring features
+
+```typescript
+import { Crepe } from '@milkdown/crepe'
+
+const crepe = new Crepe({
+  root: '#editor',
+  defaultValue: '',
+  features: {
+    [Crepe.Feature.TopBar]: true,       // enable top bar (off by default)
+    [Crepe.Feature.Placeholder]: true,
+  },
+  featureConfigs: {
+    [Crepe.Feature.Placeholder]: {
+      text: 'Type "/" for commands…',
+      mode: 'doc',
+    },
+    [Crepe.Feature.ImageBlock]: {
+      onUpload: async (file) => {
+        const formData = new FormData()
+        formData.append('file', file)
+        const res = await fetch('/api/upload', { method: 'POST', body: formData })
+        const { url } = await res.json()
+        return url
+      },
+    },
+  },
+})
+
+await crepe.create()
+```
+
+### Listening to content changes
+
+```typescript
+const crepe = new Crepe({ root: '#editor' })
+
+crepe.on((listener) => {
+  listener.markdownUpdated((ctx, markdown) => {
+    localStorage.setItem('draft', markdown)
+  })
+})
+
+await crepe.create()
+```
+
+### Read-only mode
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  defaultValue: renderedMarkdown,
+})
+
+await crepe.create()
+crepe.setReadonly(true)
+```
+
+### Using `CrepeBuilder` for a minimal bundle
+
+```typescript
+import { CrepeBuilder } from '@milkdown/crepe/builder'
+import { blockEdit } from '@milkdown/crepe/feature/block-edit'
+import { codeMirror } from '@milkdown/crepe/feature/code-mirror'
+import { toolbar } from '@milkdown/crepe/feature/toolbar'
+
+import '@milkdown/crepe/theme/common/prosemirror.css'
+import '@milkdown/crepe/theme/common/reset.css'
+import '@milkdown/crepe/theme/common/block-edit.css'
+import '@milkdown/crepe/theme/common/toolbar.css'
+import '@milkdown/crepe/theme/classic.css'
+
+const builder = new CrepeBuilder({
+  root: '#editor',
+  defaultValue: '# Hello',
+})
+
+builder
+  .addFeature(blockEdit)
+  .addFeature(codeMirror)
+  .addFeature(toolbar)
+
+await builder.create()
+```

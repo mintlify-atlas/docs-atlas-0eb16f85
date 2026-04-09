@@ -1,0 +1,196 @@
+---
+title: 'Commands'
+description: 'How to call, define, and chain commands in Milkdown using the ctx-based command system.'
+---
+
+Commands in Milkdown are ProseMirror commands (`(state, dispatch?, view?) => boolean`) wrapped for the ctx system. Instead of calling them directly with a ProseMirror view, you dispatch them through the `CommandManager` stored in `commandsCtx`. This means commands are accessible from anywhere that has a `Ctx` reference, including outside the editor.
+
+## How commands work
+
+The `CommandManager` is injected into `commandsCtx` by the `commands` internal plugin. It wraps a ProseMirror command in a `Cmd<T>` factory — a function that takes an optional payload and returns the underlying ProseMirror command:
+
+```typescript
+// packages/core/src/internal-plugin/commands.ts
+type Cmd<T = undefined> = (payload?: T) => Command
+type CmdKey<T = undefined> = SliceType<Cmd<T>>
+
+export const commandsCtx = createSlice(new CommandManager(), 'commands')
+```
+
+Each command has a `CmdKey<T>` — a `SliceType` that stores the `Cmd<T>` factory. You use the key to register a command, call it, and remove it.
+
+## Calling a command with editor.action()
+
+`editor.action()` passes the editor's `Ctx` to a callback. Use the `callCommand` helper from `@milkdown/utils` to dispatch a command from outside the editor:
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { callCommand } from '@milkdown/kit/utils'
+import { toggleStrongCommand } from '@milkdown/kit/preset/commonmark'
+
+const editor = await Editor.make()
+  .use(/* plugins */)
+  .create()
+
+// Call a built-in command
+editor.action(callCommand(toggleStrongCommand.key))
+
+// Call a command with a payload
+editor.action(callCommand(wrapInHeadingCommand.key, 2))
+```
+
+`callCommand` returns `(ctx: Ctx) => boolean`, which matches the `editor.action<T>(action: (ctx: Ctx) => T) => T` signature.
+
+## Calling a command directly with commandsCtx
+
+You can also get the `CommandManager` and call it directly:
+
+```typescript
+editor.action((ctx) => {
+  const commands = ctx.get(commandsCtx)
+  commands.call(toggleStrongCommand.key)
+})
+```
+
+## Defining a custom command with $command
+
+The `$command` composable from `@milkdown/utils` is the standard way to define commands. It registers the command into `commandsCtx` and exposes a `.key` property for calling it later:
+
+```typescript
+import { $command } from '@milkdown/kit/utils'
+import { setBlockType } from '@milkdown/kit/prose/commands'
+import { headingSchema } from './my-schema'
+
+// $command(keyName, factory)
+// The factory receives ctx and must return a Cmd<T>
+export const setHeadingCommand = $command(
+  'SetHeading',
+  (ctx) => (level = 1) => setBlockType(headingSchema.type(ctx), { level })
+)
+```
+
+Register it with the editor and call it:
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { callCommand } from '@milkdown/kit/utils'
+
+const editor = await Editor.make()
+  .use(setHeadingCommand)
+  .use(/* other plugins */)
+  .create()
+
+// Call with a payload
+editor.action(callCommand(setHeadingCommand.key, 2))
+
+// Or use the .run() shortcut
+setHeadingCommand.run(2)
+```
+
+The `$Command<T>` type returned by `$command` extends `MilkdownPlugin` with two extra properties:
+
+| Property | Description |
+|----------|-------------|
+| `.key` | The `CmdKey<T>` used to call the command via `callCommand` or `commandsCtx.call()` |
+| `.run(payload?)` | Shorthand that calls the command on the live editor |
+
+## Async commands with $commandAsync
+
+If the factory needs to do async work (for example, fetching remote content before inserting):
+
+```typescript
+import { $commandAsync } from '@milkdown/kit/utils'
+
+export const insertRemoteImageCommand = $commandAsync(
+  'InsertRemoteImage',
+  async (ctx) => {
+    return async (url = '') => {
+      const src = await fetchImage(url)
+      return insertImage(src)
+    }
+  }
+)
+```
+
+## Registering a command manually
+
+If you need lower-level control, register a command directly with the `CommandManager`:
+
+```typescript
+import { createCmdKey, commandsCtx, CommandsReady } from '@milkdown/kit/core'
+import type { MilkdownPlugin } from '@milkdown/kit/ctx'
+
+export const myKey = createCmdKey<string>('myCommand')
+
+const myCommandPlugin: MilkdownPlugin = (ctx) => {
+  return async () => {
+    await ctx.wait(CommandsReady)
+
+    ctx.get(commandsCtx).create(myKey, (payload = '') => (state, dispatch) => {
+      // ... ProseMirror command body ...
+      return true
+    })
+
+    return () => {
+      ctx.get(commandsCtx).remove(myKey)
+    }
+  }
+}
+```
+
+<Note>
+  Always wait for `CommandsReady` before calling `ctx.get(commandsCtx)`. The `CommandManager` is injected by the `commands` internal plugin, but is only ready after `CommandsReady` fires.
+</Note>
+
+## Command chains
+
+The `CommandManager` exposes a `chain()` method for composing multiple commands into a sequence. Commands run in order until one returns `true`:
+
+```typescript
+editor.action((ctx) => {
+  ctx.get(commandsCtx)
+    .chain()
+    .pipe(toggleBoldCommand.key)
+    .pipe(toggleItalicCommand.key)
+    .inline((state, dispatch) => {
+      // inline ProseMirror command
+      return false
+    })
+    .run()
+})
+```
+
+| Method | Description |
+|--------|-------------|
+| `.pipe(key, payload?)` | Add a registered command to the chain by key |
+| `.inline(command)` | Add a raw ProseMirror command to the chain |
+| `.run()` | Execute the chain; returns `boolean` |
+
+## Reading the current markdown after a command
+
+After running a command, you can read the updated document as markdown using `getMarkdown`:
+
+```typescript
+import { getMarkdown } from '@milkdown/kit/utils'
+
+editor.action(callCommand(toggleStrongCommand.key))
+const markdown = editor.action(getMarkdown())
+console.log(markdown)
+```
+
+## Built-in command keys from commonmark
+
+The `@milkdown/preset-commonmark` package exposes command keys for every editing operation it provides. Common examples:
+
+| Key | Payload | Description |
+|-----|---------|-------------|
+| `toggleStrongCommand.key` | — | Toggle bold on selection |
+| `toggleEmphasisCommand.key` | — | Toggle italic on selection |
+| `toggleInlineCodeCommand.key` | — | Toggle inline code on selection |
+| `wrapInHeadingCommand.key` | `number` (1–6) | Wrap selection in a heading |
+| `wrapInBulletListCommand.key` | — | Wrap selection in a bullet list |
+| `wrapInOrderedListCommand.key` | — | Wrap selection in an ordered list |
+| `insertHrCommand.key` | — | Insert a horizontal rule |
+| `insertImageCommand.key` | `{ src, alt, title }` | Insert an image |
+
+Import them from `@milkdown/kit/preset/commonmark` (or `@milkdown/preset-commonmark`) and pass their `.key` to `callCommand`.

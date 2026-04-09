@@ -1,0 +1,203 @@
+---
+title: 'Plugin system'
+description: 'How Milkdown plugins are structured, registered, and managed through the Editor class.'
+---
+
+Everything in Milkdown is a plugin. The schema, parser, serializer, commands, and the editor view itself are all internal plugins of the same kind. User-facing plugins follow exactly the same contract, which means they have the same access to the context and the same lifecycle guarantees.
+
+## What is a MilkdownPlugin
+
+A `MilkdownPlugin` is a function with a specific shape:
+
+```typescript
+// packages/ctx/src/plugin/types.ts
+type MilkdownPlugin = { meta?: Meta } & ((ctx: Ctx) => CtxRunner)
+
+type CtxRunner = () => RunnerReturnType
+type RunnerReturnType = void | Promise<void> | Cleanup | Promise<Cleanup>
+type Cleanup = () => void | Promise<void>
+```
+
+A plugin is a function that:
+1. Receives a `Ctx` instance (the plugin's private view into the shared context)
+2. Returns a `CtxRunner` — a second function that does the plugin's main work and optionally returns a cleanup function
+
+This two-phase structure separates **setup** (injecting slices, recording timers) from **execution** (waiting on dependencies, creating real objects).
+
+### Minimal plugin
+
+```typescript
+import type { MilkdownPlugin } from '@milkdown/ctx'
+
+const myPlugin: MilkdownPlugin = (ctx) => {
+  // Phase 1 — setup: register slices and timers here
+  return async () => {
+    // Phase 2 — run: do async work here
+    return () => {
+      // Phase 3 — cleanup: remove slices, clear timers
+    }
+  }
+}
+```
+
+### Plugin without cleanup
+
+```typescript
+const myPlugin: MilkdownPlugin = (ctx) => {
+  return () => {
+    // run — no cleanup needed
+  }
+}
+```
+
+## Plugin metadata
+
+Plugins carry an optional `meta` property that the inspector uses for telemetry. The `Meta` interface requires `displayName` and `package`:
+
+```typescript
+// packages/ctx/src/inspector/meta.ts
+interface Meta {
+  displayName: string
+  description?: string
+  package: string
+  group?: string
+  additional?: Record<string, any>
+}
+```
+
+Attach metadata directly on the plugin function:
+
+```typescript
+import type { MilkdownPlugin } from '@milkdown/ctx'
+
+const myPlugin: MilkdownPlugin = (ctx) => {
+  return async () => { /* ... */ }
+}
+
+myPlugin.meta = {
+  package: '@my-scope/my-plugin',
+  displayName: 'MyPlugin',
+}
+```
+
+Internal plugins use the `withMeta` helper from `@milkdown/core` to do the same thing:
+
+```typescript
+// packages/core/src/internal-plugin/schema.ts
+withMeta(schema, {
+  displayName: 'Schema',
+})
+```
+
+## Registering plugins with Editor.use()
+
+Call `editor.use()` before or after `editor.create()`:
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
+
+const editor = await Editor.make()
+  .use(commonmark)
+  .use(listener)
+  .config((ctx) => {
+    ctx.get(listenerCtx).markdownUpdated((ctx, markdown) => {
+      console.log(markdown)
+    })
+  })
+  .create()
+```
+
+`editor.use()` accepts a single plugin or an array of plugins:
+
+```typescript
+editor.use([pluginA, pluginB, pluginC])
+```
+
+If called after the editor is already `Created`, the plugin is prepared immediately and its runner is called on the next `create()` cycle. If called before `create()`, setup runs at `create()` time.
+
+## Removing plugins at runtime
+
+```typescript
+await editor.remove(myPlugin)
+```
+
+<Warning>
+  Do not call `editor.remove()` while the editor status is `OnCreate`. Milkdown will retry the call after a short delay, but it is cleaner to remove plugins before or after the creation cycle.
+</Warning>
+
+## The plugin store
+
+The editor maintains two internal plugin stores — one for system (internal) plugins and one for user plugins — as `Map<MilkdownPlugin, { ctx, handler, cleanup }>`. When a plugin is prepared, its `ctx` (a view of the shared context) and the `CtxRunner` are stored. After the runner executes, the cleanup function replaces the `cleanup` slot.
+
+```typescript
+// Simplified from packages/core/src/editor/editor.ts
+type EditorPluginStore = Map<
+  MilkdownPlugin,
+  {
+    ctx: Ctx | undefined
+    handler: CtxRunner | undefined
+    cleanup: ReturnType<CtxRunner>
+  }
+>
+```
+
+## Internal vs user plugins
+
+Internal plugins are loaded by the editor itself before user plugins run. They establish the foundation every user plugin depends on:
+
+| Internal plugin | What it provides |
+|----------------|-----------------|
+| `config` | Runs all `editor.config()` callbacks; resolves `ConfigReady` |
+| `init` | Injects core slices (`remarkCtx`, `prosePluginsCtx`, etc.); resolves `InitReady` |
+| `schema` | Builds the ProseMirror `Schema` from `nodesCtx`/`marksCtx`; resolves `SchemaReady` |
+| `parser` | Creates the markdown parser; resolves `ParserReady` |
+| `serializer` | Creates the markdown serializer; resolves `SerializerReady` |
+| `commands` | Creates the `CommandManager`; resolves `CommandsReady` |
+| `keymap` | Collects keymaps; resolves `KeymapReady` |
+| `editorState` | Creates `EditorState`; resolves `EditorStateReady` |
+| `editorView` | Mounts the `EditorView`; resolves `EditorViewReady` |
+
+User plugins run concurrently with internal plugins and use timers to synchronize.
+
+## Inspecting plugins
+
+Enable the inspector before calling `create()` to collect per-plugin telemetry:
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+
+const editor = await Editor.make()
+  .enableInspector()
+  .use(commonmark)
+  .create()
+
+const telemetry = editor.inspect()
+// Returns Telemetry[] — one entry per plugin that has a meta property
+
+telemetry.forEach((t) => {
+  console.log(t.metadata.displayName)
+  console.log('Injected slices:', t.injectedSlices)
+  console.log('Consumed slices:', t.consumedSlices)
+  console.log('Recorded timers:', t.recordedTimers)
+  console.log('Waited timers:', t.waitTimers)
+})
+```
+
+The `Telemetry` object for each plugin contains:
+
+```typescript
+interface Telemetry {
+  metadata: Meta
+  injectedSlices: { name: string; value: unknown }[]
+  consumedSlices: { name: string; value: unknown }[]
+  recordedTimers: { name: string; duration: number; status: TimerStatus }[]
+  waitTimers: { name: string; duration: number; status: TimerStatus }[]
+}
+```
+
+<Note>
+  `editor.inspect()` only returns entries for plugins that have a `meta` property set. Plugins without metadata are not tracked.
+</Note>

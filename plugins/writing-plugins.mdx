@@ -1,0 +1,429 @@
+---
+title: 'Writing plugins'
+description: 'Learn how to write your own Milkdown plugins using the MilkdownPlugin type, ctx.inject(), ctx.wait(), and the composable utility helpers.'
+---
+
+Every feature in Milkdown — from bold text to collaborative editing — is implemented as a plugin. Writing a plugin gives you access to the full editor context: the schema, the ProseMirror state, commands, and more.
+
+## The `MilkdownPlugin` type
+
+A plugin is a function that:
+1. Receives a `Ctx` instance during **setup**.
+2. Returns a `CtxRunner` — a function called during the **run** phase.
+3. Optionally returns a cleanup function from the runner.
+
+```typescript
+// packages/ctx/src/plugin/types.ts
+export type MilkdownPlugin = { meta?: Meta } & ((ctx: Ctx) => CtxRunner)
+
+type CtxRunner = () => void | Promise<void> | Cleanup | Promise<Cleanup>
+type Cleanup  = () => void | Promise<void>
+```
+
+The full three-phase structure looks like this:
+
+```typescript
+import type { MilkdownPlugin } from '@milkdown/ctx'
+
+const myPlugin: MilkdownPlugin = (ctx) => {
+  // Phase 1 — setup
+  // Runs synchronously when editor.use() or editor.create() is called.
+  // Register slices and timers here.
+
+  return async () => {
+    // Phase 2 — run
+    // Runs after all plugins are set up.
+    // Use ctx.wait() to wait for dependencies, then do your main work.
+
+    return () => {
+      // Phase 3 — cleanup
+      // Runs when editor.destroy() is called.
+      // Remove slices and timers you registered.
+    }
+  }
+}
+```
+
+<Tip>
+  The cleanup function is optional. If your plugin has no teardown logic, you can omit the return value from the runner.
+</Tip>
+
+## Plugin metadata
+
+Attach a `meta` object to your plugin so it is identifiable in the Milkdown inspector:
+
+```typescript
+myPlugin.meta = {
+  package: '@my-org/my-plugin',
+  displayName: 'MyPlugin',
+}
+```
+
+## Working with `Ctx`
+
+The `Ctx` object is the interface to Milkdown's shared state. It manages **slices** (typed key-value pairs) and **timers** (one-shot async signals).
+
+### Injecting a slice
+
+Use `ctx.inject()` during the setup phase to register a slice:
+
+```typescript
+import { createSlice } from '@milkdown/ctx'
+
+// Define a typed slice type with a default value and a unique name
+const wordCountCtx = createSlice(0, 'wordCount')
+
+const myPlugin: MilkdownPlugin = (ctx) => {
+  ctx.inject(wordCountCtx, 0)
+
+  return async () => {
+    // ... update the slice value later
+
+    return () => {
+      ctx.remove(wordCountCtx)
+    }
+  }
+}
+```
+
+### Reading and writing slices
+
+```typescript
+// Get the current value
+const count = ctx.get(wordCountCtx)
+
+// Set a new value
+ctx.set(wordCountCtx, 42)
+
+// Update with a callback
+ctx.update(wordCountCtx, (prev) => prev + 1)
+```
+
+### Waiting for timers
+
+Milkdown's internal plugins signal readiness through timers. Wait for a timer before using a dependency:
+
+```typescript
+import { SchemaReady, EditorViewReady } from '@milkdown/core'
+
+return async () => {
+  // Block until the ProseMirror schema is built
+  await ctx.wait(SchemaReady)
+
+  // Now you can safely read the schema
+  const schema = ctx.get(schemaCtx)
+
+  // Block until the editor view is mounted
+  await ctx.wait(EditorViewReady)
+
+  // Now you can access the editor view
+  const view = ctx.get(editorViewCtx)
+}
+```
+
+**Key timers in order:**
+
+| Timer | When it resolves |
+|-------|-----------------|
+| `ConfigReady` | Config phase complete |
+| `InitReady` | Plugin setup phase complete |
+| `SchemaReady` | ProseMirror schema is built |
+| `ParserReady` | Markdown parser is ready |
+| `SerializerReady` | Markdown serializer is ready |
+| `CommandsReady` | Commands system is initialized |
+| `EditorStateReady` | ProseMirror `EditorState` is created |
+| `EditorViewReady` | ProseMirror `EditorView` is mounted |
+
+## Adding ProseMirror plugins
+
+Use `ctx.update(prosePluginsCtx, ...)` to register a ProseMirror plugin:
+
+```typescript
+import { prosePluginsCtx, EditorViewReady } from '@milkdown/core'
+import { Plugin, PluginKey } from '@milkdown/prose/state'
+
+const myPlugin: MilkdownPlugin = (ctx) => {
+  return async () => {
+    await ctx.wait(EditorViewReady)
+
+    const pluginKey = new PluginKey('MY_PLUGIN')
+    const prosePlugin = new Plugin({
+      key: pluginKey,
+      // ... ProseMirror plugin spec
+    })
+
+    ctx.update(prosePluginsCtx, (plugins) => [...plugins, prosePlugin])
+
+    return () => {
+      ctx.update(prosePluginsCtx, (plugins) =>
+        plugins.filter((p) => p !== prosePlugin)
+      )
+    }
+  }
+}
+```
+
+## Utility composables
+
+The `@milkdown/utils` package provides composable helpers that handle the repetitive parts of plugin creation. Use these instead of writing raw plugins when possible.
+
+### `$ctx` — register a slice
+
+```typescript
+import { $ctx } from '@milkdown/utils'
+
+// Creates a plugin that injects 'wordCount' and cleans it up on destroy
+const wordCountCtx = $ctx(0, 'wordCount')
+// wordCountCtx.key is the SliceType — use it with ctx.get(wordCountCtx.key)
+```
+
+### `$prose` — register a ProseMirror plugin
+
+Waits for `SchemaReady` automatically, then registers your ProseMirror plugin:
+
+```typescript
+import { $prose } from '@milkdown/utils'
+import { Plugin, PluginKey } from '@milkdown/prose/state'
+
+const myProsePlugin = $prose((ctx) => {
+  return new Plugin({
+    key: new PluginKey('MY_PLUGIN'),
+    // ...
+  })
+})
+```
+
+### `$node` — add a schema node
+
+```typescript
+import { $node } from '@milkdown/utils'
+
+const calloutNode = $node('callout', (ctx) => ({
+  group: 'block',
+  content: 'block+',
+  attrs: { type: { default: 'info' } },
+  parseDOM: [{ tag: 'div[data-callout]' }],
+  toDOM: () => ['div', { 'data-callout': true }, 0],
+  parseMarkdown: {
+    match: (node) => node.type === 'blockquote',
+    runner: (state, node, type) => {
+      state.openNode(type).next(node.children).closeNode()
+    },
+  },
+  toMarkdown: {
+    match: (node) => node.type.name === 'callout',
+    runner: (state, node) => {
+      state.openNode('blockquote').next(node.children).closeNode()
+    },
+  },
+}))
+// calloutNode.type(ctx) returns the ProseMirror NodeType
+```
+
+### `$command` — register a command
+
+```typescript
+import { $command } from '@milkdown/utils'
+import { setBlockType } from '@milkdown/prose/commands'
+
+const setAsHeadingCommand = $command('SetAsHeading', (ctx) => {
+  return (level = 1) =>
+    setBlockType(headingSchema.type(ctx), { level })
+})
+
+// Call it from an action:
+// editor.action(callCommand(setAsHeadingCommand.key, 2))
+```
+
+## Complete example: a word-count plugin
+
+This example builds a plugin that:
+- Tracks the word count in a slice.
+- Updates the count on every document change.
+- Exposes the count so other plugins and application code can read it.
+
+```typescript
+import type { MilkdownPlugin } from '@milkdown/ctx'
+import { createSlice } from '@milkdown/ctx'
+import {
+  EditorViewReady,
+  prosePluginsCtx,
+  serializerCtx,
+} from '@milkdown/core'
+import { Plugin, PluginKey } from '@milkdown/prose/state'
+
+// 1. Define a typed slice to hold the word count
+export const wordCountCtx = createSlice(0, 'wordCount')
+
+function countWords(text: string): number {
+  return text.trim() === '' ? 0 : text.trim().split(/\s+/).length
+}
+
+// 2. Define the plugin
+export const wordCount: MilkdownPlugin = (ctx) => {
+  // Setup phase — register the slice
+  ctx.inject(wordCountCtx, 0)
+
+  return async () => {
+    // Run phase — wait for the editor view before creating the ProseMirror plugin
+    await ctx.wait(EditorViewReady)
+
+    const key = new PluginKey('WORD_COUNT')
+
+    const prosePlugin = new Plugin({
+      key,
+      state: {
+        init: (_, { doc }) => {
+          const count = countWords(doc.textContent)
+          ctx.set(wordCountCtx, count)
+          return count
+        },
+        apply: (tr, value) => {
+          if (!tr.docChanged) return value
+          const count = countWords(tr.doc.textContent)
+          ctx.set(wordCountCtx, count)
+          return count
+        },
+      },
+    })
+
+    ctx.update(prosePluginsCtx, (plugins) => [...plugins, prosePlugin])
+
+    // Cleanup phase
+    return () => {
+      ctx.update(prosePluginsCtx, (plugins) =>
+        plugins.filter((p) => p !== prosePlugin)
+      )
+      ctx.remove(wordCountCtx)
+    }
+  }
+}
+
+wordCount.meta = {
+  package: '@my-org/plugin-word-count',
+  displayName: 'WordCount',
+}
+```
+
+**Using the plugin:**
+
+```typescript
+import { Editor, rootCtx } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { wordCount, wordCountCtx } from './word-count-plugin'
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.set(rootCtx, document.getElementById('editor'))
+  })
+  .use(commonmark)
+  .use(wordCount)
+  .create()
+
+// Read the current word count at any time
+editor.action((ctx) => {
+  const count = ctx.get(wordCountCtx)
+  document.getElementById('word-count')!.textContent = `${count} words`
+})
+```
+
+## Using the composable helpers version
+
+The same plugin rewritten with `$ctx` and `$prose`:
+
+```typescript
+import { $ctx, $prose } from '@milkdown/utils'
+import { Plugin, PluginKey } from '@milkdown/prose/state'
+
+export const wordCountCtx = $ctx(0, 'wordCount')
+
+function countWords(text: string): number {
+  return text.trim() === '' ? 0 : text.trim().split(/\s+/).length
+}
+
+export const wordCountPlugin = $prose((ctx) => {
+  const key = new PluginKey('WORD_COUNT')
+
+  return new Plugin({
+    key,
+    state: {
+      init: (_, { doc }) => {
+        const count = countWords(doc.textContent)
+        ctx.set(wordCountCtx.key, count)
+        return count
+      },
+      apply: (tr, value) => {
+        if (!tr.docChanged) return value
+        const count = countWords(tr.doc.textContent)
+        ctx.set(wordCountCtx.key, count)
+        return count
+      },
+    },
+  })
+})
+
+// Export as a flat array, like all official plugins
+export const wordCount = [wordCountCtx, wordCountPlugin]
+```
+
+## Composing multiple plugins
+
+Export your plugin as a flat array to match the convention used by official plugins:
+
+```typescript
+// my-plugin/src/index.ts
+import type { MilkdownPlugin } from '@milkdown/ctx'
+
+export const myPlugin: MilkdownPlugin[] = [
+  myCtxPlugin,    // registers slices
+  myProsePlugin,  // registers ProseMirror plugins
+  myCommand,      // registers commands
+].flat()
+
+// Usage:
+Editor.make().use(commonmark).use(myPlugin).create()
+```
+
+## Testing plugins
+
+Test plugins by creating a headless editor instance with `@testing-library` or plain JavaScript:
+
+```typescript
+import { Editor, defaultValueCtx, rootCtx } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { wordCount, wordCountCtx } from './word-count-plugin'
+
+describe('wordCount plugin', () => {
+  let editor: Editor
+  let container: HTMLElement
+
+  beforeEach(async () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+
+    editor = await Editor.make()
+      .config((ctx) => {
+        ctx.set(rootCtx, container)
+        ctx.set(defaultValueCtx, 'Hello world, this is Milkdown.')
+      })
+      .use(commonmark)
+      .use(wordCount)
+      .create()
+  })
+
+  afterEach(async () => {
+    await editor.destroy()
+    container.remove()
+  })
+
+  it('counts words in the initial document', () => {
+    editor.action((ctx) => {
+      expect(ctx.get(wordCountCtx)).toBe(5)
+    })
+  })
+})
+```
+
+<Note>
+  Milkdown's timer system is fully async. Always `await editor.create()` before making assertions, and `await editor.destroy()` in teardown to prevent timer leaks between tests.
+</Note>

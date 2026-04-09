@@ -1,0 +1,1032 @@
+---
+title: "Crepe features"
+description: "API reference for every CrepeFeature — configuration interfaces, default states, and usage examples."
+---
+
+Crepe ships thirteen feature plugins, each independently enabled, disabled, and configured through the `features` and `featureConfigs` options on [`CrepeConfig`](/api/crepe#crepeconfig-interface).
+
+## `CrepeFeature` enum
+
+```typescript
+enum CrepeFeature {
+  CodeMirror  = 'code-mirror',
+  ListItem    = 'list-item',
+  LinkTooltip = 'link-tooltip',
+  Cursor      = 'cursor',
+  ImageBlock  = 'image-block',
+  BlockEdit   = 'block-edit',
+  Toolbar     = 'toolbar',
+  Placeholder = 'placeholder',
+  Table       = 'table',
+  Latex       = 'latex',
+  TopBar      = 'top-bar',
+  Diff        = 'diff',
+  Streaming   = 'streaming',
+}
+```
+
+## Default feature states
+
+Most features are **enabled by default**. Three are opt-in and must be turned on explicitly:
+
+| Feature | Default |
+|---|---|
+| `CodeMirror` | enabled |
+| `ListItem` | enabled |
+| `LinkTooltip` | enabled |
+| `Cursor` | enabled |
+| `ImageBlock` | enabled |
+| `BlockEdit` | enabled |
+| `Toolbar` | enabled |
+| `Placeholder` | enabled |
+| `Table` | enabled |
+| `Latex` | enabled |
+| `TopBar` | **disabled** |
+| `Diff` | **disabled** |
+| `Streaming` | **disabled** |
+
+To override defaults, pass a `features` map to the `Crepe` constructor:
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  features: {
+    [Crepe.Feature.TopBar]: true,        // enable
+    [Crepe.Feature.Placeholder]: false,  // disable
+  },
+})
+```
+
+---
+
+## Feature reference
+
+### `CodeMirror`
+
+Syntax-highlighted code blocks powered by [CodeMirror 6](https://codemirror.net/). Supports language selection, theming, copy, and an optional preview panel.
+
+<Warning>
+  The `Latex` feature requires `CodeMirror` to be enabled. Disabling `CodeMirror` while `Latex` is on will throw at runtime.
+</Warning>
+
+**Config interface**
+
+```typescript
+type CodeMirrorFeatureConfig = Partial<{
+  // CodeMirror extensions to add (e.g. language support, keymaps)
+  extensions: Extension[]
+  // Available languages shown in the language picker
+  languages: LanguageDescription[]
+  // A CodeMirror theme Extension
+  theme: Extension
+
+  // UI icons / labels
+  expandIcon: string
+  searchIcon: string
+  clearSearchIcon: string
+  searchPlaceholder: string
+  noResultText: string
+  copyIcon: string
+  copyText: string
+
+  // Callbacks
+  onCopy: (content: string) => void
+
+  // Custom render functions
+  renderLanguage: (language: string, selected: boolean) => string
+  renderPreview: (
+    language: string,
+    content: string,
+    applyPreview: (value: null | string | HTMLElement) => void
+  ) => void | null | string | HTMLElement
+
+  // Preview toggle button
+  previewToggleIcon: (previewOnlyMode: boolean) => string
+  previewToggleText: (previewOnlyMode: boolean) => string
+  previewLabel: string
+  previewLoading: string | HTMLElement
+  previewOnlyByDefault: boolean
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="extensions" type="Extension[]">
+    Additional CodeMirror `Extension` values merged with the built-in defaults (`basicSetup` and `indentWithTab`).
+  </ResponseField>
+  <ResponseField name="languages" type="LanguageDescription[]">
+    Languages surfaced in the language selector dropdown. Import from `@codemirror/language-data` for the full list.
+  </ResponseField>
+  <ResponseField name="theme" type="Extension">
+    A CodeMirror theme extension, e.g. `oneDark` from `@codemirror/theme-one-dark`.
+  </ResponseField>
+  <ResponseField name="expandIcon" type="string">
+    HTML string for the language picker chevron icon.
+  </ResponseField>
+  <ResponseField name="searchIcon" type="string">
+    HTML string for the language search icon.
+  </ResponseField>
+  <ResponseField name="clearSearchIcon" type="string">
+    HTML string for the clear-search button icon.
+  </ResponseField>
+  <ResponseField name="searchPlaceholder" type="string" default="'Search language'">
+    Placeholder text in the language search input.
+  </ResponseField>
+  <ResponseField name="noResultText" type="string" default="'No result'">
+    Message shown when no language matches the search query.
+  </ResponseField>
+  <ResponseField name="copyIcon" type="string">
+    HTML string for the copy button icon.
+  </ResponseField>
+  <ResponseField name="copyText" type="string" default="'Copy'">
+    Label text for the copy button.
+  </ResponseField>
+  <ResponseField name="onCopy" type="(content: string) => void">
+    Called when the user clicks the copy button. Receives the code block content.
+  </ResponseField>
+  <ResponseField name="renderLanguage" type="(language: string, selected: boolean) => string">
+    Custom renderer for each language option in the dropdown. Return an HTML string.
+  </ResponseField>
+  <ResponseField name="renderPreview" type="function">
+    Render a preview for a given language. Return an HTML string, an `HTMLElement`, or `null` to fall back to the default. Used to implement custom preview panels (e.g. rendering LaTeX, Mermaid).
+  </ResponseField>
+  <ResponseField name="previewToggleIcon" type="(previewOnlyMode: boolean) => string">
+    Icon for the preview/edit toggle button. Receives current mode, return an HTML string.
+  </ResponseField>
+  <ResponseField name="previewToggleText" type="(previewOnlyMode: boolean) => string">
+    Label for the preview/edit toggle button. Defaults to `'Hide'` / `'Edit'`.
+  </ResponseField>
+  <ResponseField name="previewLabel" type="string" default="'Preview'">
+    Label shown in the preview panel header.
+  </ResponseField>
+  <ResponseField name="previewLoading" type="string | HTMLElement" default="'Loading...'">
+    Content displayed while the preview is loading.
+  </ResponseField>
+  <ResponseField name="previewOnlyByDefault" type="boolean" default="false">
+    When `true`, code blocks open in preview-only mode by default.
+  </ResponseField>
+</Expandable>
+
+**Example**
+
+```typescript
+import { oneDark } from '@codemirror/theme-one-dark'
+import { languages } from '@codemirror/language-data'
+
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.CodeMirror]: {
+      theme: oneDark,
+      languages,
+      searchPlaceholder: 'Search programming language…',
+    },
+  },
+})
+```
+
+---
+
+### `ListItem`
+
+Renders bullet list icons, ordered list labels, and checkbox icons for task lists.
+
+**Config interface**
+
+```typescript
+type ListItemFeatureConfig = Partial<{
+  bulletIcon: string
+  checkBoxCheckedIcon: string
+  checkBoxUncheckedIcon: string
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="bulletIcon" type="string">
+    HTML string rendered as the bullet point for unordered list items.
+  </ResponseField>
+  <ResponseField name="checkBoxCheckedIcon" type="string">
+    HTML string rendered for a checked task-list checkbox.
+  </ResponseField>
+  <ResponseField name="checkBoxUncheckedIcon" type="string">
+    HTML string rendered for an unchecked task-list checkbox.
+  </ResponseField>
+</Expandable>
+
+**Example**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.ListItem]: {
+      bulletIcon: '•',
+      checkBoxCheckedIcon: '<svg>…checked…</svg>',
+      checkBoxUncheckedIcon: '<svg>…unchecked…</svg>',
+    },
+  },
+})
+```
+
+---
+
+### `LinkTooltip`
+
+A floating tooltip that appears when the cursor is inside a link. Provides edit, remove, and copy-link actions.
+
+**Config interface**
+
+```typescript
+type LinkTooltipFeatureConfig = Partial<{
+  linkIcon: string
+  editButton: string
+  removeButton: string
+  confirmButton: string
+  inputPlaceholder: string
+  onCopyLink: (link: string) => void
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="linkIcon" type="string">
+    HTML string for the copy-link icon in the tooltip.
+  </ResponseField>
+  <ResponseField name="editButton" type="string">
+    HTML string for the edit-link button.
+  </ResponseField>
+  <ResponseField name="removeButton" type="string">
+    HTML string for the remove-link button.
+  </ResponseField>
+  <ResponseField name="confirmButton" type="string">
+    HTML string for the confirm button shown when editing the link URL.
+  </ResponseField>
+  <ResponseField name="inputPlaceholder" type="string" default="'Paste link...'">
+    Placeholder text shown in the URL input field.
+  </ResponseField>
+  <ResponseField name="onCopyLink" type="(link: string) => void">
+    Called when the user clicks the copy-link icon. Receives the link `href`.
+  </ResponseField>
+</Expandable>
+
+**Example**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.LinkTooltip]: {
+      inputPlaceholder: 'Enter URL…',
+      onCopyLink: (link) => navigator.clipboard.writeText(link),
+    },
+  },
+})
+```
+
+---
+
+### `Cursor`
+
+Provides an enhanced drop cursor (shown during drag-and-drop) and an optional virtual caret cursor for improved visual feedback.
+
+**Config interface**
+
+```typescript
+type CursorFeatureConfig = Partial<{
+  color: string | false
+  width: number
+  virtual: boolean
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="color" type="string | false" default="false">
+    CSS color string for the drop cursor indicator. Set to `false` to use the CSS-controlled default.
+  </ResponseField>
+  <ResponseField name="width" type="number" default="4">
+    Width in pixels of the drop cursor indicator line.
+  </ResponseField>
+  <ResponseField name="virtual" type="boolean" default="true">
+    When `true`, renders a virtual caret cursor via `prosemirror-virtual-cursor`. Set to `false` to disable.
+  </ResponseField>
+</Expandable>
+
+**Example**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.Cursor]: {
+      color: '#3B82F6',
+      width: 2,
+      virtual: true,
+    },
+  },
+})
+```
+
+---
+
+### `ImageBlock`
+
+Handles image upload and display for both inline images and full-width block images. Supports file-picker upload, drag-and-drop, paste, resizing, and captions.
+
+<Note>
+  When `ImageBlock` is enabled, the built-in upload plugin uses `onUpload` (or `blockOnUpload`) to convert dragged/pasted image files to URLs. If no `onUpload` is provided, files are converted to local blob URLs by default.
+</Note>
+
+**Config interface**
+
+```typescript
+type ImageBlockFeatureConfig = Partial<{
+  // Shared upload handler used by both inline and block images
+  onUpload: (file: File) => Promise<string>
+  // Transform a URL before it is set as the image src (e.g. add auth params)
+  proxyDomURL: (url: string) => Promise<string> | string
+
+  // Inline image options
+  inlineImageIcon: string
+  inlineConfirmButton: string
+  inlineUploadButton: string
+  inlineUploadPlaceholderText: string
+  inlineOnUpload: (file: File) => Promise<string>
+
+  // Block image options
+  blockImageIcon: string
+  blockConfirmButton: string
+  blockCaptionIcon: string
+  blockUploadButton: string
+  blockCaptionPlaceholderText: string
+  blockUploadPlaceholderText: string
+  blockOnUpload: (file: File) => Promise<string>
+  onImageLoadError: (event: Event) => void | Promise<void>
+  maxWidth: number
+  maxHeight: number
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="onUpload" type="(file: File) => Promise<string>">
+    Shared upload handler. Called for both inline and block images when the more-specific `inlineOnUpload` / `blockOnUpload` is not provided. Return the URL of the uploaded image.
+  </ResponseField>
+  <ResponseField name="proxyDomURL" type="(url: string) => Promise<string> | string">
+    Optional URL transformer. Useful for injecting auth tokens or CDN prefixes before the image is rendered.
+  </ResponseField>
+  <ResponseField name="inlineImageIcon" type="string">
+    Icon shown in the inline image placeholder.
+  </ResponseField>
+  <ResponseField name="inlineConfirmButton" type="string">
+    HTML for the confirm button in the inline image URL input.
+  </ResponseField>
+  <ResponseField name="inlineUploadButton" type="string" default="'Upload'">
+    Label for the inline image upload button.
+  </ResponseField>
+  <ResponseField name="inlineUploadPlaceholderText" type="string" default="'or paste link'">
+    Placeholder text shown next to the inline upload button.
+  </ResponseField>
+  <ResponseField name="inlineOnUpload" type="(file: File) => Promise<string>">
+    Upload handler for inline images only. Overrides `onUpload` for inline images.
+  </ResponseField>
+  <ResponseField name="blockImageIcon" type="string">
+    Icon shown in the block image placeholder.
+  </ResponseField>
+  <ResponseField name="blockConfirmButton" type="string" default="'Confirm'">
+    Label for the confirm button in the block image URL input.
+  </ResponseField>
+  <ResponseField name="blockCaptionIcon" type="string">
+    Icon for the block image caption toggle.
+  </ResponseField>
+  <ResponseField name="blockUploadButton" type="string" default="'Upload file'">
+    Label for the block image upload button.
+  </ResponseField>
+  <ResponseField name="blockCaptionPlaceholderText" type="string" default="'Write Image Caption'">
+    Placeholder text in the caption input.
+  </ResponseField>
+  <ResponseField name="blockUploadPlaceholderText" type="string" default="'or paste link'">
+    Placeholder text shown next to the block upload button.
+  </ResponseField>
+  <ResponseField name="blockOnUpload" type="(file: File) => Promise<string>">
+    Upload handler for block images only. Overrides `onUpload` for block images.
+  </ResponseField>
+  <ResponseField name="onImageLoadError" type="(event: Event) => void | Promise<void>">
+    Called when an image fails to load. Receives the browser `ErrorEvent`.
+  </ResponseField>
+  <ResponseField name="maxWidth" type="number">
+    Maximum width (pixels) for resizable block images.
+  </ResponseField>
+  <ResponseField name="maxHeight" type="number">
+    Maximum height (pixels) for resizable block images.
+  </ResponseField>
+</Expandable>
+
+**Example**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.ImageBlock]: {
+      onUpload: async (file) => {
+        const formData = new FormData()
+        formData.append('file', file)
+        const res = await fetch('/api/upload', { method: 'POST', body: formData })
+        const { url } = await res.json()
+        return url
+      },
+      blockCaptionPlaceholderText: 'Add a caption…',
+      maxWidth: 800,
+    },
+  },
+})
+```
+
+---
+
+### `BlockEdit`
+
+Adds a drag handle to the left of each block for drag-and-drop reordering, and a slash command (`/`) menu for inserting new content blocks.
+
+**Config interface**
+
+```typescript
+type BlockEditFeatureConfig = DeepPartial<{
+  // Drag handle icons
+  handleAddIcon: string
+  handleDragIcon: string
+
+  // Block handle positioning (passed to @milkdown/plugin-block)
+  blockHandle: Pick<
+    BlockProviderOptions,
+    | 'shouldShow'
+    | 'getOffset'
+    | 'getPosition'
+    | 'getPlacement'
+    | 'middleware'
+    | 'floatingUIOptions'
+    | 'root'
+  >
+
+  // Custom menu builder — called with the default GroupBuilder to add or reorder items
+  buildMenu: (builder: GroupBuilder<SlashMenuItem>) => void
+
+  // Slash menu groups (set a group or any item to null to hide it)
+  textGroup: {
+    label: string
+    text:    { label: string; icon: string } | null
+    h1:      { label: string; icon: string } | null
+    h2:      { label: string; icon: string } | null
+    h3:      { label: string; icon: string } | null
+    h4:      { label: string; icon: string } | null
+    h5:      { label: string; icon: string } | null
+    h6:      { label: string; icon: string } | null
+    quote:   { label: string; icon: string } | null
+    divider: { label: string; icon: string } | null
+  } | null
+
+  listGroup: {
+    label: string
+    bulletList:  { label: string; icon: string } | null
+    orderedList: { label: string; icon: string } | null
+    taskList:    { label: string; icon: string } | null
+  } | null
+
+  advancedGroup: {
+    label: string
+    image:     { label: string; icon: string } | null
+    codeBlock: { label: string; icon: string } | null
+    table:     { label: string; icon: string } | null
+    math:      { label: string; icon: string } | null
+  } | null
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="handleAddIcon" type="string">
+    HTML string for the "+" add-block button in the drag handle.
+  </ResponseField>
+  <ResponseField name="handleDragIcon" type="string">
+    HTML string for the drag grip icon in the drag handle.
+  </ResponseField>
+  <ResponseField name="blockHandle" type="object">
+    Options forwarded to the underlying `BlockProvider` from `@milkdown/plugin-block`. Lets you control tooltip placement, offset, and `floatingUI` middleware.
+  </ResponseField>
+  <ResponseField name="buildMenu" type="(builder: GroupBuilder) => void">
+    Receive the `GroupBuilder` after default groups are added. Call `builder.addGroup()` or `builder.addItem()` to extend the slash menu.
+  </ResponseField>
+  <ResponseField name="textGroup" type="object | null">
+    Configuration for the "Text" group in the slash menu. Set the whole group or any individual item to `null` to hide it.
+  </ResponseField>
+  <ResponseField name="listGroup" type="object | null">
+    Configuration for the "List" group. Set to `null` to hide the entire group.
+  </ResponseField>
+  <ResponseField name="advancedGroup" type="object | null">
+    Configuration for the "Advanced" group (image, code block, table, math). Set to `null` to hide it.
+  </ResponseField>
+</Expandable>
+
+**Example**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.BlockEdit]: {
+      textGroup: {
+        label: 'Text',
+        h4: null,  // hide H4
+        h5: null,  // hide H5
+        h6: null,  // hide H6
+      },
+      advancedGroup: {
+        label: 'Advanced',
+        math: null, // hide math option
+      },
+    },
+  },
+})
+```
+
+---
+
+### `Toolbar`
+
+A floating formatting toolbar that appears above selected text. Shows bold, italic, strikethrough, inline code, link, and (when `Latex` is enabled) math toggle buttons.
+
+**Config interface**
+
+```typescript
+type ToolbarFeatureConfig = Partial<{
+  boldIcon: string
+  codeIcon: string
+  italicIcon: string
+  linkIcon: string
+  strikethroughIcon: string
+  latexIcon: string
+  buildToolbar: (builder: GroupBuilder<ToolbarItem>) => void
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="boldIcon" type="string">
+    HTML string for the bold button icon.
+  </ResponseField>
+  <ResponseField name="italicIcon" type="string">
+    HTML string for the italic button icon.
+  </ResponseField>
+  <ResponseField name="strikethroughIcon" type="string">
+    HTML string for the strikethrough button icon.
+  </ResponseField>
+  <ResponseField name="codeIcon" type="string">
+    HTML string for the inline code button icon.
+  </ResponseField>
+  <ResponseField name="linkIcon" type="string">
+    HTML string for the link button icon.
+  </ResponseField>
+  <ResponseField name="latexIcon" type="string">
+    HTML string for the inline math (LaTeX) button icon. Only visible when `Latex` feature is enabled.
+  </ResponseField>
+  <ResponseField name="buildToolbar" type="(builder: GroupBuilder<ToolbarItem>) => void">
+    Receive the `GroupBuilder` to add custom items or groups to the toolbar.
+  </ResponseField>
+</Expandable>
+
+The `ToolbarItem` type accepted by `buildToolbar`:
+
+```typescript
+type ToolbarItem = {
+  icon: string
+  active: (ctx: Ctx) => boolean
+}
+```
+
+**Default toolbar groups**
+
+| Group | Items |
+|---|---|
+| `formatting` | Bold, Italic, Strikethrough |
+| `function` | Inline code, LaTeX (if enabled), Link |
+
+**Example**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.Toolbar]: {
+      boldIcon: '<svg>…</svg>',
+      italicIcon: '<svg>…</svg>',
+    },
+  },
+})
+```
+
+---
+
+### `Placeholder`
+
+Renders a placeholder decoration inside empty blocks (or the empty document) to guide users when the editor has no content.
+
+**Config interface**
+
+```typescript
+type PlaceholderFeatureConfig = Partial<{
+  text: string
+  mode: 'doc' | 'block'
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="text" type="string" default="'Please enter...'">
+    The placeholder text shown inside empty blocks.
+  </ResponseField>
+  <ResponseField name="mode" type="'doc' | 'block'" default="'block'">
+    Controls where the placeholder appears:
+    - `'block'` — show in every empty block where the cursor is positioned.
+    - `'doc'` — show only when the entire document is empty.
+  </ResponseField>
+</Expandable>
+
+<Note>
+  The placeholder is never shown in read-only mode, inside code blocks, or inside list items.
+</Note>
+
+**Example**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.Placeholder]: {
+      text: 'Type "/" for commands…',
+      mode: 'doc',
+    },
+  },
+})
+```
+
+---
+
+### `Table`
+
+Full-featured GFM table editing with add/delete row and column controls, column alignment, and drag-and-drop row/column reordering.
+
+**Config interface**
+
+```typescript
+type TableFeatureConfig = Partial<{
+  addRowIcon: string
+  addColIcon: string
+  deleteRowIcon: string
+  deleteColIcon: string
+  alignLeftIcon: string
+  alignCenterIcon: string
+  alignRightIcon: string
+  colDragHandleIcon: string
+  rowDragHandleIcon: string
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="addRowIcon" type="string">
+    HTML string for the add-row button.
+  </ResponseField>
+  <ResponseField name="addColIcon" type="string">
+    HTML string for the add-column button.
+  </ResponseField>
+  <ResponseField name="deleteRowIcon" type="string">
+    HTML string for the delete-row button.
+  </ResponseField>
+  <ResponseField name="deleteColIcon" type="string">
+    HTML string for the delete-column button.
+  </ResponseField>
+  <ResponseField name="alignLeftIcon" type="string">
+    HTML string for the align-left button.
+  </ResponseField>
+  <ResponseField name="alignCenterIcon" type="string">
+    HTML string for the align-center button.
+  </ResponseField>
+  <ResponseField name="alignRightIcon" type="string">
+    HTML string for the align-right button.
+  </ResponseField>
+  <ResponseField name="colDragHandleIcon" type="string">
+    HTML string for the column drag grip.
+  </ResponseField>
+  <ResponseField name="rowDragHandleIcon" type="string">
+    HTML string for the row drag grip.
+  </ResponseField>
+</Expandable>
+
+**Example**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.Table]: {
+      addRowIcon: '<svg>…</svg>',
+      addColIcon: '<svg>…</svg>',
+    },
+  },
+})
+```
+
+---
+
+### `Latex`
+
+Adds support for inline math (`$…$`) and block math (`` ```latex `` code fences) rendered with [KaTeX](https://katex.org/). Block math is rendered as a preview in code blocks; inline math uses a tooltip editor.
+
+<Warning>
+  `Latex` requires the `CodeMirror` feature to be enabled. Enabling `Latex` while `CodeMirror` is disabled throws an error at editor creation time.
+</Warning>
+
+**Config interface**
+
+```typescript
+type LatexFeatureConfig = Partial<{
+  katexOptions: KatexOptions
+  inlineEditConfirm: string
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="katexOptions" type="KatexOptions">
+    Options passed to `katex.renderToString()` for block math rendering. `throwOnError` is always forced to `false` and `displayMode` to `true` regardless of what you pass.
+  </ResponseField>
+  <ResponseField name="inlineEditConfirm" type="string">
+    HTML string for the confirm button in the inline math tooltip editor.
+  </ResponseField>
+</Expandable>
+
+**Example**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  featureConfigs: {
+    [Crepe.Feature.Latex]: {
+      katexOptions: {
+        macros: { '\\R': '\\mathbb{R}' },
+      },
+    },
+  },
+})
+```
+
+---
+
+### `TopBar`
+
+A fixed toolbar mounted above the editor content with a heading-level selector, formatting buttons, and insert actions. Unlike `Toolbar` (which is a floating selection tooltip), `TopBar` is always visible.
+
+This feature is **disabled by default**. Enable it by setting `[Crepe.Feature.TopBar]: true` in `features`.
+
+**Config interface**
+
+```typescript
+type TopBarFeatureConfig = Partial<{
+  headingOptions: HeadingOption[]
+  boldIcon: string
+  italicIcon: string
+  strikethroughIcon: string
+  codeIcon: string
+  linkIcon: string
+  imageIcon: string
+  tableIcon: string
+  codeBlockIcon: string
+  mathIcon: string
+  quoteIcon: string
+  hrIcon: string
+  bulletListIcon: string
+  orderedListIcon: string
+  taskListIcon: string
+  chevronDownIcon: string
+  buildTopBar: (builder: GroupBuilder<TopBarItem>) => void
+}>
+```
+
+The `HeadingOption` type:
+
+```typescript
+type HeadingOption = {
+  label: string
+  level: number | null  // null = paragraph
+}
+```
+
+The default heading options are:
+
+```typescript
+[
+  { label: 'Paragraph', level: null },
+  { label: 'Heading 1', level: 1 },
+  { label: 'Heading 2', level: 2 },
+  { label: 'Heading 3', level: 3 },
+  { label: 'Heading 4', level: 4 },
+  { label: 'Heading 5', level: 5 },
+  { label: 'Heading 6', level: 6 },
+]
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="headingOptions" type="HeadingOption[]">
+    Options for the heading-level dropdown selector. Each entry has a `label` and a `level` (`null` for paragraph, `1`–`6` for headings).
+  </ResponseField>
+  <ResponseField name="boldIcon" type="string">HTML string for the bold button.</ResponseField>
+  <ResponseField name="italicIcon" type="string">HTML string for the italic button.</ResponseField>
+  <ResponseField name="strikethroughIcon" type="string">HTML string for the strikethrough button.</ResponseField>
+  <ResponseField name="codeIcon" type="string">HTML string for the inline code button.</ResponseField>
+  <ResponseField name="linkIcon" type="string">HTML string for the link button.</ResponseField>
+  <ResponseField name="imageIcon" type="string">HTML string for the insert-image button. Only visible when `ImageBlock` is enabled.</ResponseField>
+  <ResponseField name="tableIcon" type="string">HTML string for the insert-table button. Only visible when `Table` is enabled.</ResponseField>
+  <ResponseField name="codeBlockIcon" type="string">HTML string for the insert-code-block button.</ResponseField>
+  <ResponseField name="mathIcon" type="string">HTML string for the insert-math button. Only visible when `Latex` is enabled.</ResponseField>
+  <ResponseField name="quoteIcon" type="string">HTML string for the blockquote button.</ResponseField>
+  <ResponseField name="hrIcon" type="string">HTML string for the horizontal rule button.</ResponseField>
+  <ResponseField name="bulletListIcon" type="string">HTML string for the bullet list button.</ResponseField>
+  <ResponseField name="orderedListIcon" type="string">HTML string for the ordered list button.</ResponseField>
+  <ResponseField name="taskListIcon" type="string">HTML string for the task list button.</ResponseField>
+  <ResponseField name="chevronDownIcon" type="string">HTML string for the heading selector dropdown chevron.</ResponseField>
+  <ResponseField name="buildTopBar" type="(builder: GroupBuilder<TopBarItem>) => void">
+    Receive the `GroupBuilder` to add custom groups and items to the top bar. Called after all default groups are added.
+  </ResponseField>
+</Expandable>
+
+**Default top bar groups**
+
+| Group | Items |
+|---|---|
+| `heading` | Heading selector dropdown |
+| `formatting` | Bold, Italic, Strikethrough, Inline code |
+| `list` | Bullet list, Ordered list, Task list |
+| `insert` | Link, Image (if `ImageBlock` on), Table (if `Table` on) |
+| `block` | Code block, Math (if `Latex` on) |
+| `more` | Blockquote, Horizontal rule |
+
+**Example: enable with custom heading options**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  features: {
+    [Crepe.Feature.TopBar]: true,
+  },
+  featureConfigs: {
+    [Crepe.Feature.TopBar]: {
+      headingOptions: [
+        { label: 'Text', level: null },
+        { label: 'H1', level: 1 },
+        { label: 'H2', level: 2 },
+        { label: 'H3', level: 3 },
+      ],
+    },
+  },
+})
+```
+
+**Example: add a custom dropdown via `buildTopBar`**
+
+```typescript
+featureConfigs: {
+  [Crepe.Feature.TopBar]: {
+    buildTopBar: (builder) => {
+      builder.addGroup('custom', 'Custom').addItem('font-size', {
+        icon: '',
+        active: () => false,
+        selector: {
+          chevronIcon: '<svg>…</svg>',
+          activeLabel: () => '16px',
+          options: [
+            { label: '12px', onSelect: (ctx) => { /* apply font size */ } },
+            { label: '16px', onSelect: (ctx) => { /* apply font size */ } },
+          ],
+        },
+      })
+    },
+  },
+}
+```
+
+---
+
+### `Diff`
+
+Diff review mode for comparing two document states. Adds accept/reject UI for individual change hunks.
+
+This feature is **disabled by default**. Enable it with `[Crepe.Feature.Diff]: true`.
+
+**Config interface**
+
+```typescript
+type DiffFeatureConfig = Partial<{
+  lockOnReview: boolean
+  classPrefix: string
+  acceptLabel: string
+  rejectLabel: string
+  customBlockTypes: string[]
+  ignoreAttrs: Record<string, string[]>
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="lockOnReview" type="boolean" default="true">
+    When `true`, the editor is locked (read-only) while the user reviews changes in diff mode.
+  </ResponseField>
+  <ResponseField name="classPrefix" type="string" default="'milkdown-diff'">
+    CSS class prefix applied to diff decoration elements.
+  </ResponseField>
+  <ResponseField name="acceptLabel" type="string" default="'Accept'">
+    Label text for the accept-change button.
+  </ResponseField>
+  <ResponseField name="rejectLabel" type="string" default="'Reject'">
+    Label text for the reject-change button.
+  </ResponseField>
+  <ResponseField name="customBlockTypes" type="string[]" default="['table', 'image-block', 'code_block']">
+    Node type names that use custom node views. These types are diffed as atomic units rather than recursively. Defaults to Crepe's built-in custom blocks.
+  </ResponseField>
+  <ResponseField name="ignoreAttrs" type="Record<string, string[]>" default="{ heading: ['id'] }">
+    A map of node type names to attribute keys that should be ignored when computing diffs. Defaults to ignoring `id` on heading nodes.
+  </ResponseField>
+</Expandable>
+
+**Example**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  features: {
+    [Crepe.Feature.Diff]: true,
+  },
+  featureConfigs: {
+    [Crepe.Feature.Diff]: {
+      lockOnReview: true,
+      acceptLabel: 'Apply',
+      rejectLabel: 'Discard',
+    },
+  },
+})
+```
+
+---
+
+### `Streaming`
+
+Progressive markdown rendering for AI-generated content. Accepts a stream of text tokens and renders them incrementally into the editor with throttled parse/diff/apply cycles.
+
+This feature is **disabled by default**. Enable it with `[Crepe.Feature.Streaming]: true`.
+
+<Tip>
+  Enable `Diff` alongside `Streaming` and set `diffReviewOnEnd: true` to let users review AI-generated changes before they are accepted.
+</Tip>
+
+**Config interface**
+
+```typescript
+type StreamingFeatureConfig = Partial<{
+  throttleMs: number
+  lockDuringStreaming: boolean
+  scrollFollow: boolean
+  diffReviewOnEnd: boolean
+  ignoreAttrs: Record<string, string[]>
+  insertStrategy: InsertStrategyResolver
+}>
+```
+
+<Expandable title="Field descriptions">
+  <ResponseField name="throttleMs" type="number" default="100">
+    Interval in milliseconds between parse/diff/apply cycles while tokens are incoming.
+  </ResponseField>
+  <ResponseField name="lockDuringStreaming" type="boolean" default="true">
+    When `true`, the editor is set read-only while streaming. When `false`, concurrent user edits are allowed, but those edits will be discarded if streaming is aborted or diff-review restores the original document.
+  </ResponseField>
+  <ResponseField name="scrollFollow" type="boolean" default="true">
+    When `true`, the editor viewport scrolls to follow newly rendered content.
+  </ResponseField>
+  <ResponseField name="diffReviewOnEnd" type="boolean" default="false">
+    When `true`, the editor enters diff review mode once streaming ends, showing the changes between the original document and the streamed content.
+  </ResponseField>
+  <ResponseField name="ignoreAttrs" type="Record<string, string[]>" default="{ heading: ['id'] }">
+    Node attribute keys to ignore when diffing during incremental flushes. Defaults to ignoring `id` on heading nodes.
+  </ResponseField>
+  <ResponseField name="insertStrategy" type="InsertStrategyResolver">
+    Custom resolver that determines how streamed content is inserted based on the cursor position. When omitted, the plugin uses its built-in `defaultInsertStrategy`. See `@milkdown/plugin-streaming` for the full `InsertStrategy` type.
+  </ResponseField>
+</Expandable>
+
+**Example**
+
+```typescript
+const crepe = new Crepe({
+  root: '#editor',
+  features: {
+    [Crepe.Feature.Streaming]: true,
+    [Crepe.Feature.Diff]: true,
+  },
+  featureConfigs: {
+    [Crepe.Feature.Streaming]: {
+      diffReviewOnEnd: true,
+      throttleMs: 50,
+      scrollFollow: true,
+    },
+  },
+})
+```

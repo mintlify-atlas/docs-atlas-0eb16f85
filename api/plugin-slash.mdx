@@ -1,0 +1,223 @@
+---
+title: plugin-slash
+description: Slash command menu for Milkdown — factory function, provider class, and floating UI integration.
+---
+
+The `@milkdown/plugin-slash` package gives you the building blocks to create a slash command menu (the `/` menu commonly found in block editors). It does not ship a pre-built UI — you provide the HTML element and control what commands appear. The package handles trigger detection, positioning via [Floating UI](https://floating-ui.com/), and show/hide logic.
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/plugin-slash
+```
+
+```bash yarn
+yarn add @milkdown/plugin-slash
+```
+
+```bash pnpm
+pnpm add @milkdown/plugin-slash
+```
+
+</CodeGroup>
+
+---
+
+## `slashFactory`
+
+Creates a named slash plugin. Call `slashFactory` with a unique string ID to get a two-element array `[specCtx, prosePlugin]`. Spread it into `.use()` to register both.
+
+```typescript
+export function slashFactory<Id extends string, State = any>(
+  id: Id
+): SlashPlugin<Id, State>
+```
+
+The returned `SlashPlugin` array also has two convenience properties:
+
+- `.key` — the `SliceType` for the `PluginSpec` context slice (`${id}_SLASH_SPEC`).
+- `.pluginKey` — the `$Prose` key for the ProseMirror plugin.
+
+### Basic setup
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { slashFactory, SlashProvider } from '@milkdown/plugin-slash'
+
+const slash = slashFactory('mySlash')
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.set(slash.key, {
+      view: () => {
+        const content = document.getElementById('slash-menu')!
+        const provider = new SlashProvider({ content })
+
+        return {
+          update: (view, prevState) => provider.update(view, prevState),
+          destroy: () => provider.destroy(),
+        }
+      },
+    })
+  })
+  .use(commonmark)
+  .use(slash)
+  .create()
+```
+
+The `PluginSpec` you set on `slash.key` is passed directly to the underlying ProseMirror `Plugin` constructor, so you can use the full ProseMirror plugin API (`view`, `state`, `props`).
+
+---
+
+## `SlashProvider`
+
+A helper class that manages positioning and visibility of the slash menu element using Floating UI.
+
+```typescript
+export class SlashProvider {
+  element: HTMLElement
+  onShow: () => void
+  onHide: () => void
+
+  constructor(options: SlashProviderOptions)
+
+  update(view: EditorView, prevState?: EditorState): void
+  getContent(view: EditorView, matchNode?: (node: Node) => boolean): string | undefined
+  show(): void
+  hide(): void
+  destroy(): void
+}
+```
+
+### `SlashProviderOptions`
+
+```typescript
+export interface SlashProviderOptions {
+  content: HTMLElement
+  debounce?: number
+  shouldShow?: (view: EditorView, prevState?: EditorState) => boolean
+  trigger?: string | string[]
+  offset?: OffsetOptions
+  middleware?: Middleware[]
+  floatingUIOptions?: Partial<ComputePositionConfig>
+  root?: HTMLElement
+}
+```
+
+<ParamField body="content" type="HTMLElement" required>
+  The HTML element to use as the slash menu. The provider appends it to the editor's parent element (or `root`) on first update and positions it with Floating UI.
+</ParamField>
+
+<ParamField body="debounce" type="number" default="200">
+  Milliseconds to debounce the `update` handler.
+</ParamField>
+
+<ParamField body="shouldShow" type="function">
+  Custom function to decide whether the slash menu should be visible. Receives the current `EditorView` and the previous `EditorState`. Defaults to checking whether the last character in the current paragraph matches `trigger`.
+</ParamField>
+
+<ParamField body="trigger" type="string | string[]" default="'/'">
+  The character (or array of characters) that activates the slash menu. The default `shouldShow` implementation checks whether the last character in the text block is one of these values.
+</ParamField>
+
+<ParamField body="offset" type="OffsetOptions">
+  Floating UI offset options. Passed to the `offset` middleware.
+</ParamField>
+
+<ParamField body="middleware" type="Middleware[]">
+  Additional Floating UI middleware appended after the built-in `flip` and `offset` middlewares.
+</ParamField>
+
+<ParamField body="floatingUIOptions" type="Partial<ComputePositionConfig>">
+  Full Floating UI `computePosition` options. Setting `middleware` or `placement` here overrides the internal defaults. Default placement is `bottom-start`.
+</ParamField>
+
+<ParamField body="root" type="HTMLElement">
+  The DOM element the slash menu element is appended to. Defaults to the editor's parent element.
+</ParamField>
+
+### Methods
+
+<AccordionGroup>
+  <Accordion title="update(view, prevState?)">
+    Call this from the ProseMirror plugin view's `update` method. Debounces internally and repositions the slash element when it should be shown.
+  </Accordion>
+
+  <Accordion title="getContent(view, matchNode?)">
+    Returns the text content of the current text block up to the cursor position. The optional `matchNode` function determines which ancestor node counts as the "text block" (defaults to `paragraph`). Returns `undefined` when the conditions for showing the slash menu are not met.
+  </Accordion>
+
+  <Accordion title="show()">
+    Sets `element.dataset.show = 'true'` and calls `onShow()`.
+  </Accordion>
+
+  <Accordion title="hide()">
+    Sets `element.dataset.show = 'false'` and calls `onHide()`.
+  </Accordion>
+
+  <Accordion title="destroy()">
+    Cancels the debounced updater. Call this from the ProseMirror plugin view's `destroy` method.
+  </Accordion>
+</AccordionGroup>
+
+### Callbacks
+
+- **`onShow`** — called when the slash element becomes visible. Override to trigger animations or focus the menu.
+- **`onHide`** — called when the slash element is hidden.
+
+---
+
+## Visibility toggling via `data-show`
+
+The provider sets `element.dataset.show` to `'true'` or `'false'`. Use CSS to control visibility:
+
+```css
+#slash-menu {
+  display: none;
+}
+
+#slash-menu[data-show='true'] {
+  display: block;
+}
+```
+
+---
+
+## Complete example
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { slashFactory, SlashProvider } from '@milkdown/plugin-slash'
+
+const slash = slashFactory('commands')
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.set(slash.key, {
+      view: () => {
+        const content = document.createElement('div')
+        content.id = 'slash-menu'
+        content.innerHTML = '<ul><li>Heading</li><li>Code block</li></ul>'
+
+        const provider = new SlashProvider({
+          content,
+          trigger: '/',
+          onShow: () => console.log('menu shown'),
+          onHide: () => console.log('menu hidden'),
+        })
+
+        return {
+          update: (view, prevState) => provider.update(view, prevState),
+          destroy: () => provider.destroy(),
+        }
+      },
+    })
+  })
+  .use(commonmark)
+  .use(slash)
+  .create()
+```

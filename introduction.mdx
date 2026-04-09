@@ -1,0 +1,70 @@
+---
+title: Introduction
+description: Milkdown is a plugin-driven WYSIWYG markdown editor framework built on ProseMirror and remark.
+---
+
+Milkdown is a lightweight, composable WYSIWYG markdown editor framework. Rather than shipping a monolithic editor, Milkdown gives you a set of focused plugins that you assemble into exactly the editing experience you need — or you can skip the assembly entirely and use **Crepe**, the batteries-included editor built on top of Milkdown.
+
+## Why Milkdown?
+
+<CardGroup cols={2}>
+  <Card title="Plugin-driven" icon="puzzle-piece">
+    Every feature is an independent plugin. Add only what you need, replace what you don't, and write your own when the built-in options don't fit.
+  </Card>
+  <Card title="ProseMirror + remark" icon="layer-group">
+    Built on the two most reliable foundations in the ecosystem. ProseMirror handles the editing model; remark handles markdown parsing and serialization.
+  </Card>
+  <Card title="CommonMark and GFM" icon="github">
+    First-class support for CommonMark and GitHub Flavored Markdown, including tables, strikethrough, task lists, and autolinks.
+  </Card>
+  <Card title="Framework integrations" icon="plug">
+    Official React and Vue packages let you drop Milkdown into any component tree without ceremony.
+  </Card>
+</CardGroup>
+
+## Architecture overview
+
+Milkdown is split into focused packages so you only ship what you use.
+
+| Package | Description |
+|---|---|
+| `@milkdown/core` | The `Editor` class, plugin lifecycle, and internal ProseMirror wiring. |
+| `@milkdown/kit` | A convenience re-export of core, presets, plugins, and prose utilities — the recommended starting point. |
+| `@milkdown/crepe` | A high-level, opinionated editor with all popular features enabled by default. |
+| `@milkdown/preset-commonmark` | CommonMark nodes, marks, commands, keymaps, and input rules. |
+| `@milkdown/preset-gfm` | GitHub Flavored Markdown extensions on top of CommonMark. |
+| `@milkdown/plugin-*` | Individual plugins: history, listener, upload, indent, clipboard, slash, tooltip, block, and more. |
+| `@milkdown/react` / `@milkdown/vue` | Framework integration packages. |
+
+### How plugins work
+
+The `Editor` class is a thin orchestrator. You configure it with `.config()`, attach plugins with `.use()`, and start it with `.create()`. Each plugin receives a `Ctx` (context) that gives it access to shared state, other plugins, and the ProseMirror editor.
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { rootCtx } from '@milkdown/kit/core'
+
+await Editor.make()
+  .config((ctx) => {
+    ctx.set(rootCtx, document.getElementById('editor'))
+  })
+  .use(commonmark)
+  .create()
+```
+
+### Choosing between `@milkdown/kit` and `@milkdown/crepe`
+
+- Use **`@milkdown/kit`** when you want full control over which plugins are loaded, how the editor is configured, or how it integrates into a custom component architecture.
+- Use **`@milkdown/crepe`** when you want a fully-featured editor with sensible defaults and don't need to build from scratch. Crepe includes all popular features and exposes a simple API to enable, disable, and configure them.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build a minimal editor from scratch using `@milkdown/kit`.
+  </Card>
+  <Card title="Using Crepe" icon="wand-magic-sparkles" href="/using-crepe">
+    Get a fully-featured editor running in minutes with `@milkdown/crepe`.
+  </Card>
+</CardGroup>

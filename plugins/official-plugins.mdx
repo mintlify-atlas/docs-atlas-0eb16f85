@@ -1,0 +1,607 @@
+---
+title: 'Official plugins'
+description: 'A reference for all official Milkdown plugins — editing UX, content features, collaboration, and utilities.'
+---
+
+All official plugins are available individually or bundled via `@milkdown/kit`. Each plugin exports a named array (e.g. `history`, `cursor`) that you pass to `editor.use()`.
+
+## Editing UX
+
+Plugins that improve the editing experience without changing the document model.
+
+<CardGroup cols={2}>
+  <Card title="plugin-history" icon="arrow-rotate-left">
+    Undo/redo via ProseMirror's history module. Binds `Mod-z` (undo) and `Mod-y` / `Shift-Mod-z` (redo).
+  </Card>
+  <Card title="plugin-listener" icon="bell">
+    Subscribe to editor lifecycle events: `mounted`, `updated`, `markdownUpdated`, `blur`, `focus`, `destroy`, and `selectionUpdated`.
+  </Card>
+  <Card title="plugin-indent" icon="indent">
+    Configurable `Tab` key indentation. Supports spaces or tab characters.
+  </Card>
+  <Card title="plugin-trailing" icon="paragraph">
+    Appends a trailing paragraph when the last node is not a paragraph or heading, ensuring the cursor can always reach the end.
+  </Card>
+  <Card title="plugin-cursor" icon="arrow-pointer">
+    Adds a gap cursor and a drop indicator for drag-and-drop operations.
+  </Card>
+  <Card title="plugin-clipboard" icon="clipboard">
+    Smart paste that converts pasted markdown text, HTML, and VS Code snippets into ProseMirror nodes. Serializes copied content back to markdown.
+  </Card>
+  <Card title="plugin-slash" icon="slash">
+    Infrastructure for slash-command menus. Provides `slashFactory` and `SlashProvider` for building custom `/` command UIs using Floating UI.
+  </Card>
+  <Card title="plugin-tooltip" icon="comment">
+    Infrastructure for inline floating toolbars. Provides `TooltipProvider` for building selection-triggered tooltips using Floating UI.
+  </Card>
+  <Card title="plugin-block" icon="grip-lines">
+    Block-level drag handle and action menu infrastructure. Provides `BlockProvider` and `BlockService` for building custom block controls.
+  </Card>
+</CardGroup>
+
+## Content features
+
+Plugins that add new node types or content rendering capabilities.
+
+<CardGroup cols={2}>
+  <Card title="plugin-upload" icon="upload">
+    Handles file drag-and-drop and paste. You provide an `uploader` function; the plugin shows a placeholder while the upload is in progress.
+  </Card>
+  <Card title="plugin-emoji" icon="face-smile">
+    Renders `:emoji_name:` shortcodes using Twemoji. Input rule converts shortcodes on type.
+  </Card>
+  <Card title="plugin-prism" icon="code">
+    Syntax highlighting for code blocks using Prism (via the refractor library).
+  </Card>
+  <Card title="plugin-highlight" icon="highlighter">
+    Syntax highlighting for code blocks using pluggable parsers: Shiki, lowlight, sugar-high, or refractor.
+  </Card>
+  <Card title="plugin-diff" icon="code-compare">
+    Track-changes / diff mode. Displays accepted and rejected edits as decorations with commands to accept or reject changes.
+  </Card>
+  <Card title="plugin-automd" icon="wand-magic-sparkles">
+    Inline markdown auto-formatting. Converts markdown syntax to formatted nodes as you type (similar to Typora's live-preview mode).
+  </Card>
+</CardGroup>
+
+## Collaboration
+
+<CardGroup cols={2}>
+  <Card title="plugin-collab" icon="users">
+    Real-time collaborative editing powered by [Yjs](https://yjs.dev/) and y-prosemirror. Provides `CollabService` for binding a Yjs document, awareness cursors, and collaborative undo/redo.
+  </Card>
+  <Card title="plugin-streaming" icon="wave-square">
+    Progressive insertion of AI-generated markdown. Streams content into the document chunk by chunk with commands to start, push, end, and abort a stream.
+  </Card>
+</CardGroup>
+
+## Utilities and theming
+
+<CardGroup cols={2}>
+  <Card title="theme-nord" icon="palette">
+    A minimal Nord-themed stylesheet applied as a Milkdown plugin. Sets `prose` Tailwind CSS classes and `milkdown-theme-nord` on the editor root.
+  </Card>
+</CardGroup>
+
+---
+
+## Plugin reference
+
+### plugin-history
+
+**Package:** `@milkdown/kit/plugin/history` or `@milkdown/plugin-history`
+
+Wraps [prosemirror-history](https://prosemirror.net/docs/ref/#history). Exports `undoCommand`, `redoCommand`, and `historyProviderConfig` for customizing stack depth and group delay.
+
+```typescript
+import { history, historyProviderConfig } from '@milkdown/kit/plugin/history'
+
+Editor.make()
+  .config((ctx) => {
+    // Optional: customize history depth
+    ctx.set(historyProviderConfig.key, { depth: 50, newGroupDelay: 500 })
+  })
+  .use(commonmark)
+  .use(history)
+  .create()
+```
+
+**Key exports:**
+
+| Export | Type | Description |
+|--------|------|-------------|
+| `history` | `MilkdownPlugin[]` | The full plugin array to pass to `use()` |
+| `undoCommand` | `$Command` | Command key for undo (`Mod-z`) |
+| `redoCommand` | `$Command` | Command key for redo (`Mod-y`, `Shift-Mod-z`) |
+| `historyProviderConfig` | `$Ctx` | Config slice: `{ depth?, newGroupDelay? }` |
+
+---
+
+### plugin-listener
+
+**Package:** `@milkdown/kit/plugin/listener` or `@milkdown/plugin-listener`
+
+Exposes a `ListenerManager` through `listenerCtx`. Subscribe to any combination of events with a fluent API.
+
+```typescript
+import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
+
+Editor.make()
+  .config((ctx) => {
+    ctx
+      .get(listenerCtx)
+      .mounted((ctx) => {
+        console.log('Editor mounted')
+      })
+      .markdownUpdated((ctx, markdown, prevMarkdown) => {
+        console.log('Markdown changed:', markdown)
+      })
+      .blur((ctx) => {
+        console.log('Editor blurred')
+      })
+  })
+  .use(commonmark)
+  .use(listener)
+  .create()
+```
+
+**Events on `ListenerManager`:**
+
+| Method | Signature | Fires when |
+|--------|-----------|------------|
+| `beforeMount` | `(ctx) => void` | Before the editor is mounted |
+| `mounted` | `(ctx) => void` | After the editor is mounted |
+| `updated` | `(ctx, doc, prevDoc) => void` | Document content changes |
+| `markdownUpdated` | `(ctx, markdown, prevMarkdown) => void` | Document changes (debounced 200ms, serializes to markdown) |
+| `blur` | `(ctx) => void` | Editor loses focus |
+| `focus` | `(ctx) => void` | Editor gains focus |
+| `selectionUpdated` | `(ctx, selection, prevSelection) => void` | Selection changes |
+| `destroy` | `(ctx) => void` | Before the editor is destroyed |
+
+---
+
+### plugin-upload
+
+**Package:** `@milkdown/kit/plugin/upload` or `@milkdown/plugin-upload`
+
+Intercepts drag-and-drop and paste events for files. You provide an `uploader` function that receives the `FileList` and must return a `Promise<Fragment | Node | Node[]>` to insert.
+
+```typescript
+import { upload, uploadConfig } from '@milkdown/kit/plugin/upload'
+import type { UploadOptions } from '@milkdown/kit/plugin/upload'
+
+const myUploader: UploadOptions['uploader'] = async (files, schema, ctx, insertPos) => {
+  const [file] = Array.from(files)
+  if (!file) return schema.nodes.paragraph!.create()
+
+  const url = await uploadToMyServer(file)
+  return schema.nodes.image!.create({ src: url, alt: file.name })
+}
+
+Editor.make()
+  .config((ctx) => {
+    ctx.set(uploadConfig.key, {
+      uploader: myUploader,
+      enableHtmlFileUploader: false,
+    })
+  })
+  .use(commonmark)
+  .use(upload)
+  .create()
+```
+
+**`UploadOptions` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `uploader` | `(files, schema, ctx, insertPos) => Promise<Fragment \| Node \| Node[]>` | Required. Processes files and returns ProseMirror node(s) |
+| `enableHtmlFileUploader` | `boolean` | When `true`, also uploads images pasted from HTML contexts (e.g. right-click → copy image) |
+| `uploadWidgetFactory` | `(pos, spec) => Decoration` | Custom in-progress placeholder decoration |
+| `getInsertPos` | `(event, ctx, defaultPos) => number` | Override the default insert position |
+
+---
+
+### plugin-collab
+
+**Package:** `@milkdown/kit/plugin/collab` or `@milkdown/plugin-collab`
+
+Collaborative editing via [Yjs](https://yjs.dev/). The `collab` plugin registers a `CollabService` instance accessible via `collabServiceCtx`.
+
+```typescript
+import { Editor, rootCtx } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { collab, collabServiceCtx } from '@milkdown/kit/plugin/collab'
+import * as Y from 'yjs'
+import { WebsocketProvider } from 'y-websocket'
+
+const doc = new Y.Doc()
+const provider = new WebsocketProvider('ws://localhost:1234', 'my-room', doc)
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.set(rootCtx, document.getElementById('editor'))
+  })
+  .use(commonmark)
+  .use(collab)
+  .create()
+
+// After create(), bind the Yjs document and connect
+editor.action((ctx) => {
+  const service = ctx.get(collabServiceCtx)
+
+  service
+    .bindDoc(doc)
+    .setAwareness(provider.awareness)
+    .connect()
+})
+```
+
+**`CollabService` methods:**
+
+| Method | Description |
+|--------|-------------|
+| `bindDoc(doc)` | Bind a Yjs `Doc` (uses the `'prosemirror'` XmlFragment) |
+| `bindXmlFragment(fragment)` | Bind a specific Yjs `XmlFragment` directly |
+| `setAwareness(awareness)` | Enable cursor presence via y-protocols awareness |
+| `setOptions(options)` | Set `ySyncOpts`, `yCursorOpts`, `yUndoOpts` |
+| `applyTemplate(value, condition?)` | Seed the Yjs document with initial content when it is empty |
+| `connect()` | Activate collaboration plugins in the editor |
+| `disconnect()` | Remove collaboration plugins from the editor |
+
+---
+
+### plugin-slash
+
+**Package:** `@milkdown/kit/plugin/slash` or `@milkdown/plugin-slash`
+
+Provides the infrastructure for `/` command menus. The plugin itself does not render any UI — you build the menu with your preferred framework and wire it up with `SlashProvider`.
+
+```typescript
+import { slashFactory, SlashProvider } from '@milkdown/kit/plugin/slash'
+
+// Create a named slash plugin instance
+const slash = slashFactory('my-slash')
+
+// In your component setup
+const slashProvider = new SlashProvider({
+  content: document.getElementById('slash-menu')!,
+  trigger: '/',         // character(s) that open the menu
+  debounce: 150,        // ms to wait before updating position
+})
+
+Editor.make()
+  .config((ctx) => {
+    ctx.set(slash.key, {
+      view: () => ({
+        update: (view, prevState) => slashProvider.update(view, prevState),
+        destroy: () => slashProvider.destroy(),
+      }),
+    })
+  })
+  .use(commonmark)
+  .use(slash)
+  .create()
+```
+
+---
+
+### plugin-tooltip
+
+**Package:** `@milkdown/kit/plugin/tooltip` or `@milkdown/plugin-tooltip`
+
+Infrastructure for floating toolbars that appear on text selection. Use `TooltipProvider` to position and show/hide a custom toolbar element.
+
+```typescript
+import { tooltipFactory, TooltipProvider } from '@milkdown/kit/plugin/tooltip'
+
+const tooltip = tooltipFactory('my-tooltip')
+
+const tooltipProvider = new TooltipProvider({
+  content: document.getElementById('formatting-toolbar')!,
+  shouldShow: (view) => {
+    const { selection } = view.state
+    return !selection.empty
+  },
+})
+
+Editor.make()
+  .config((ctx) => {
+    ctx.set(tooltip.key, {
+      view: () => ({
+        update: (view, prevState) => tooltipProvider.update(view, prevState),
+        destroy: () => tooltipProvider.destroy(),
+      }),
+    })
+  })
+  .use(commonmark)
+  .use(tooltip)
+  .create()
+```
+
+---
+
+### plugin-block
+
+**Package:** `@milkdown/kit/plugin/block` or `@milkdown/plugin-block`
+
+A block-level drag handle and action bar. `BlockProvider` tracks the hovered block and exposes the block element's position so you can render a custom handle UI.
+
+```typescript
+import { block, blockConfig } from '@milkdown/kit/plugin/block'
+
+Editor.make()
+  .config((ctx) => {
+    ctx.set(blockConfig.key, {
+      filterNodes: (node) => node.type.name !== 'doc',
+    })
+  })
+  .use(commonmark)
+  .use(block)
+  .create()
+```
+
+---
+
+### plugin-indent
+
+**Package:** `@milkdown/kit/plugin/indent` or `@milkdown/plugin-indent`
+
+Inserts configurable indentation when the user presses `Tab`.
+
+```typescript
+import { indent, indentConfig } from '@milkdown/kit/plugin/indent'
+
+Editor.make()
+  .config((ctx) => {
+    ctx.set(indentConfig.key, { type: 'space', size: 4 })
+  })
+  .use(commonmark)
+  .use(indent)
+  .create()
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `type` | `'space' \| 'tab'` | `'space'` | The indentation character |
+| `size` | `number` | `2` | Number of spaces (ignored when `type` is `'tab'`) |
+
+---
+
+### plugin-trailing
+
+**Package:** `@milkdown/kit/plugin/trailing` or `@milkdown/plugin-trailing`
+
+Automatically appends a trailing paragraph when the last node would otherwise be unfocusable (e.g. a code block or table).
+
+```typescript
+import { trailing, trailingConfig } from '@milkdown/kit/plugin/trailing'
+
+Editor.make()
+  .config((ctx) => {
+    ctx.set(trailingConfig.key, {
+      shouldAppend: (lastNode) => {
+        if (!lastNode) return false
+        return !['heading', 'paragraph'].includes(lastNode.type.name)
+      },
+      getNode: (state) => state.schema.nodes.paragraph!.create(),
+    })
+  })
+  .use(commonmark)
+  .use(trailing)
+  .create()
+```
+
+---
+
+### plugin-clipboard
+
+**Package:** `@milkdown/kit/plugin/clipboard` or `@milkdown/plugin-clipboard`
+
+Enhances paste behavior:
+- Pastes plain-text markdown and parses it into the document model.
+- Pastes HTML and maps it through the schema.
+- Pastes VS Code editor content as a fenced code block (preserving language).
+- Serializes copied content back to markdown for cross-editor compatibility.
+
+```typescript
+import { clipboard } from '@milkdown/kit/plugin/clipboard'
+
+Editor.make()
+  .use(commonmark)
+  .use(clipboard)
+  .create()
+```
+
+---
+
+### plugin-cursor
+
+**Package:** `@milkdown/kit/plugin/cursor` or `@milkdown/plugin-cursor`
+
+Adds two cursor-related ProseMirror plugins:
+- **Gap cursor** — allows placing the cursor between block-level nodes.
+- **Drop indicator** — renders a visual indicator during drag-and-drop.
+
+```typescript
+import { cursor } from '@milkdown/kit/plugin/cursor'
+
+Editor.make()
+  .use(commonmark)
+  .use(cursor)
+  .create()
+```
+
+---
+
+### plugin-emoji
+
+**Package:** `@milkdown/kit/plugin/emoji` or `@milkdown/plugin-emoji`
+
+Renders emoji shortcodes (`:smile:`) as Twemoji images. An input rule converts the shortcode automatically when you finish typing it.
+
+```typescript
+import { emoji } from '@milkdown/kit/plugin/emoji'
+
+Editor.make()
+  .use(commonmark)
+  .use(emoji)
+  .create()
+```
+
+---
+
+### plugin-prism
+
+**Package:** `@milkdown/kit/plugin/prism` or `@milkdown/plugin-prism`
+
+Syntax highlighting for code blocks using [Prism](https://prismjs.com/) via the [refractor](https://github.com/wooorm/refractor) library. Register additional languages through `prismConfig`.
+
+```typescript
+import { prism, prismConfig } from '@milkdown/kit/plugin/prism'
+import { refractor } from 'refractor'
+import typescript from 'refractor/lang/typescript'
+
+Editor.make()
+  .config((ctx) => {
+    ctx.set(prismConfig.key, {
+      configureRefractor: (r) => {
+        r.register(typescript)
+      },
+    })
+  })
+  .use(commonmark)
+  .use(prism)
+  .create()
+```
+
+---
+
+### plugin-highlight
+
+**Package:** `@milkdown/kit/plugin/highlight` or `@milkdown/plugin-highlight`
+
+Syntax highlighting via [prosemirror-highlight](https://github.com/ocavue/prosemirror-highlight). Supports Shiki, lowlight, sugar-high, and refractor as parsers. You must configure a parser; the plugin will throw otherwise.
+
+```typescript
+import { highlight, highlightPluginConfig } from '@milkdown/kit/plugin/highlight'
+import { getHighlighter } from 'shiki'
+import { createHighlightPlugin } from 'prosemirror-highlight/shiki'
+
+const highlighter = await getHighlighter({ themes: ['nord'], langs: ['typescript'] })
+
+Editor.make()
+  .config((ctx) => {
+    ctx.set(highlightPluginConfig.key, {
+      parser: (code, language) => highlighter.codeToHast(code, { lang: language, theme: 'nord' }),
+    })
+  })
+  .use(commonmark)
+  .use(highlight)
+  .create()
+```
+
+---
+
+### plugin-diff
+
+**Package:** `@milkdown/kit/plugin/diff` or `@milkdown/plugin-diff`
+
+Track-changes mode. Computes a diff between two documents and presents accepted/rejected change decorations. Useful for review workflows or AI-generated edits.
+
+```typescript
+import { diff, startDiffReviewCmd } from '@milkdown/kit/plugin/diff'
+import { callCommand } from '@milkdown/kit/utils'
+
+Editor.make()
+  .use(commonmark)
+  .use(diff)
+  .create()
+
+// Trigger a review against a new version of the content
+editor.action(callCommand(startDiffReviewCmd.key, '# Updated heading\n\nNew content here.'))
+```
+
+**Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `startDiffReviewCmd` | Begin a diff review with new content |
+| `startDiffReviewFromDocCmd` | Begin a diff review from a ProseMirror doc |
+| `acceptDiffChunkCmd` | Accept one change chunk |
+| `rejectDiffChunkCmd` | Reject one change chunk |
+| `acceptAllDiffsCmd` | Accept all pending changes |
+| `rejectAllDiffsCmd` | Reject all pending changes |
+| `clearDiffReviewCmd` | Exit diff review mode |
+
+---
+
+### plugin-streaming
+
+**Package:** `@milkdown/kit/plugin/streaming` or `@milkdown/plugin-streaming`
+
+Inserts AI-generated markdown progressively into the document. Chunks of markdown text are pushed into the editor incrementally and rendered as they arrive.
+
+```typescript
+import { streaming, startStreamingCmd, pushChunkCmd, endStreamingCmd } from '@milkdown/kit/plugin/streaming'
+import { callCommand } from '@milkdown/kit/utils'
+
+Editor.make()
+  .use(commonmark)
+  .use(streaming)
+  .create()
+
+// Start a stream
+editor.action(callCommand(startStreamingCmd.key))
+
+// Push chunks as they arrive
+for await (const chunk of myAIStream) {
+  editor.action(callCommand(pushChunkCmd.key, chunk))
+}
+
+// Signal completion
+editor.action(callCommand(endStreamingCmd.key))
+```
+
+---
+
+### plugin-automd
+
+**Package:** `@milkdown/kit/plugin/automd` or `@milkdown/plugin-automd`
+
+Inline markdown auto-formatting (Typora-style live preview). Converts markdown syntax into formatted content as you type, without requiring a trailing space or `Enter`.
+
+```typescript
+import { automd } from '@milkdown/kit/plugin/automd'
+
+Editor.make()
+  .use(commonmark)
+  .use(automd)
+  .create()
+```
+
+---
+
+### theme-nord
+
+**Package:** `@milkdown/kit/theme/nord` or `@milkdown/theme-nord`
+
+A Nord-flavored theme applied as a Milkdown config plugin. Sets Tailwind `prose` classes and `milkdown-theme-nord` on the editor root element.
+
+```typescript
+import { Editor, rootCtx } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { nord } from '@milkdown/theme-nord'
+import '@milkdown/theme-nord/style.css'
+
+const editor = await Editor.make()
+  .config(nord)
+  .config((ctx) => {
+    ctx.set(rootCtx, document.getElementById('editor'))
+  })
+  .use(commonmark)
+  .create()
+```
+
+<Note>
+  `nord` is a config function, not a `MilkdownPlugin[]` array. Pass it to `.config()` rather than `.use()`.
+</Note>

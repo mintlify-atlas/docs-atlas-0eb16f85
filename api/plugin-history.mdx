@@ -1,0 +1,142 @@
+---
+title: plugin-history
+description: Undo and redo support for Milkdown, wrapping the prosemirror-history plugin.
+---
+
+The `@milkdown/plugin-history` package adds undo/redo functionality to Milkdown. It wraps [prosemirror-history](https://prosemirror.net/docs/ref/#history) and exposes Milkdown commands and configurable keymaps.
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/plugin-history
+```
+
+```bash yarn
+yarn add @milkdown/plugin-history
+```
+
+```bash pnpm
+pnpm add @milkdown/plugin-history
+```
+
+</CodeGroup>
+
+## Usage
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { history } from '@milkdown/kit/plugin/history'
+
+Editor.make().use(commonmark).use(history).create()
+```
+
+### `history`
+
+The main export. An array of `MilkdownPlugin` values that registers history support, including the configuration slice, the ProseMirror plugin, the keymap, and the undo/redo commands.
+
+```typescript
+import type { MilkdownPlugin } from '@milkdown/ctx'
+
+export const history: MilkdownPlugin[]
+```
+
+---
+
+## Commands
+
+### `undoCommand`
+
+Wraps the ProseMirror [`undo`](https://prosemirror.net/docs/ref/#history.undo) command. Call it via `commandsCtx` or the default `Mod-z` shortcut.
+
+```typescript
+export const undoCommand: $Command<void, 'Undo'>
+```
+
+```typescript
+import { callCommand } from '@milkdown/kit/utils'
+import { undoCommand } from '@milkdown/plugin-history'
+
+editor.action(callCommand(undoCommand.key))
+```
+
+### `redoCommand`
+
+Wraps the ProseMirror [`redo`](https://prosemirror.net/docs/ref/#history.redo) command. Call it via `commandsCtx` or the default `Mod-y` / `Shift-Mod-z` shortcut.
+
+```typescript
+export const redoCommand: $Command<void, 'Redo'>
+```
+
+```typescript
+import { callCommand } from '@milkdown/kit/utils'
+import { redoCommand } from '@milkdown/plugin-history'
+
+editor.action(callCommand(redoCommand.key))
+```
+
+---
+
+## Configuration
+
+### `historyProviderConfig`
+
+A `$ctx` slice that holds the [configuration object](https://prosemirror.net/docs/ref/#history.history%5Econfig) passed to the underlying ProseMirror history plugin.
+
+```typescript
+export const historyProviderConfig: $Ctx<
+  { depth?: number; newGroupDelay?: number },
+  'historyProviderConfig'
+>
+```
+
+<ParamField body="depth" type="number">
+  Maximum number of history events to keep. Defaults to 100 (ProseMirror default).
+</ParamField>
+
+<ParamField body="newGroupDelay" type="number">
+  Minimum delay in milliseconds between two changes before they are grouped into separate history events. Defaults to 500.
+</ParamField>
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { history, historyProviderConfig } from '@milkdown/plugin-history'
+
+Editor.make()
+  .config((ctx) => {
+    ctx.set(historyProviderConfig.key, {
+      depth: 50,
+      newGroupDelay: 1000,
+    })
+  })
+  .use(commonmark)
+  .use(history)
+  .create()
+```
+
+### `historyProviderPlugin`
+
+The internal `$prose` wrapper around `prosemirrorHistory(config)`. You do not need to use this directly — it is included in the `history` array.
+
+---
+
+## Keymap
+
+### `historyKeymap`
+
+Registers the following default shortcuts:
+
+| Shortcut | Action |
+| --- | --- |
+| `Mod-z` | Undo |
+| `Mod-y` | Redo |
+| `Shift-Mod-z` | Redo |
+
+`Mod` is `Cmd` on macOS and `Ctrl` on Windows/Linux.
+
+<Note>
+  The history plugin registers its own keymap independently from the CommonMark preset. Both keymaps are active when you load `history` alongside `commonmark`.
+</Note>

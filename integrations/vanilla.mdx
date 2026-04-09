@@ -1,0 +1,283 @@
+---
+title: "Vanilla JS / TS"
+description: "Use Milkdown without a framework by creating an Editor instance directly and attaching it to a DOM element."
+---
+
+Milkdown has no hard dependency on any UI framework. You can use it in any environment that has access to the DOM — plain HTML pages, build-tool setups, web components, or any framework that is not covered by the dedicated integrations.
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/kit
+```
+
+```bash yarn
+yarn add @milkdown/kit
+```
+
+```bash pnpm
+pnpm add @milkdown/kit
+```
+
+</CodeGroup>
+
+`@milkdown/kit` is a meta-package that re-exports the Milkdown core, presets, plugins, and utilities under sub-paths:
+
+| Sub-path | Contents |
+| --- | --- |
+| `@milkdown/kit/core` | `Editor`, `rootCtx`, `defaultValueCtx`, and other core exports |
+| `@milkdown/kit/preset/commonmark` | `commonmark` preset |
+| `@milkdown/kit/plugin/listener` | `listener` plugin, `listenerCtx` |
+| `@milkdown/kit/utils` | `getMarkdown`, `replaceAll`, `insert`, and other macros |
+
+## Creating an editor
+
+Use `Editor.make()` to start building an editor. Chain `.config()` to configure context slices, `.use()` to register plugins and presets, then call `.create()` to mount the editor asynchronously.
+
+```typescript
+import { Editor, rootCtx, defaultValueCtx } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.set(rootCtx, document.getElementById('editor')!)
+    ctx.set(defaultValueCtx, '# Hello, Milkdown!')
+  })
+  .use(commonmark)
+  .create()
+```
+
+### rootCtx
+
+`rootCtx` accepts a `Node`, CSS selector string, or `null`. When you provide an element, Milkdown creates a `.milkdown` container div inside it and mounts the ProseMirror view there.
+
+```typescript
+// DOM element
+ctx.set(rootCtx, document.querySelector('#app')!)
+
+// CSS selector
+ctx.set(rootCtx, '#app')
+
+// document.body (default when rootCtx is not set)
+ctx.set(rootCtx, document.body)
+```
+
+### defaultValueCtx
+
+`defaultValueCtx` sets the initial markdown content of the editor.
+
+```typescript
+ctx.set(defaultValueCtx, '## Getting started\n\nEdit this content.')
+```
+
+## Getting content
+
+### Using plugin-listener
+
+`plugin-listener` fires callbacks whenever the document changes. Register it with `.use(listener)` and subscribe to `markdownUpdated` inside `.config()`.
+
+```typescript
+import { Editor, rootCtx, defaultValueCtx } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.set(rootCtx, document.getElementById('editor')!)
+    ctx.set(defaultValueCtx, '# Hello!')
+
+    ctx.get(listenerCtx).markdownUpdated((_, markdown, prevMarkdown) => {
+      console.log('Content changed:', markdown)
+    })
+  })
+  .use(commonmark)
+  .use(listener)
+  .create()
+```
+
+The `ListenerManager` exposes these methods, all chainable:
+
+| Method | Callback signature | Description |
+| --- | --- | --- |
+| `markdownUpdated` | `(ctx, markdown, prevMarkdown) => void` | Document changed — provides serialized markdown |
+| `updated` | `(ctx, doc, prevDoc) => void` | Document changed — provides ProseMirror `Node` |
+| `mounted` | `(ctx) => void` | Editor mounted and ready |
+| `beforeMount` | `(ctx) => void` | Before the editor mounts |
+| `blur` | `(ctx) => void` | Editor lost focus |
+| `focus` | `(ctx) => void` | Editor gained focus |
+| `destroy` | `(ctx) => void` | Before the editor is destroyed |
+| `selectionUpdated` | `(ctx, selection, prevSelection) => void` | Selection changed |
+
+### Reading content imperatively
+
+Use `editor.action` with the `getMarkdown` utility to read the current content at any time after the editor is created.
+
+```typescript
+import { getMarkdown } from '@milkdown/kit/utils'
+
+const markdown = editor.action(getMarkdown())
+console.log(markdown)
+```
+
+## Setting content
+
+### Before creation
+
+Set the initial value with `defaultValueCtx` inside `.config()` (see above).
+
+### After creation
+
+Use `editor.action` with `replaceAll` to replace the full document after the editor is already running.
+
+```typescript
+import { replaceAll } from '@milkdown/kit/utils'
+
+editor.action(replaceAll('# New content\n\nReplaced.'))
+```
+
+Pass `true` as the second argument to flush the editor state completely (useful when plugin state must be reset):
+
+```typescript
+editor.action(replaceAll('# Reset', true))
+```
+
+To insert content at the current selection rather than replacing everything, use `insert`:
+
+```typescript
+import { insert } from '@milkdown/kit/utils'
+
+editor.action(insert('**bold text**'))
+```
+
+## Destroying the editor
+
+Call `editor.destroy()` to tear down the ProseMirror view and clean up all plugins. This returns a `Promise<Editor>`.
+
+```typescript
+await editor.destroy()
+```
+
+Pass `true` to also clear registered plugins and config:
+
+```typescript
+await editor.destroy(true)
+```
+
+<Tip>
+Always destroy the editor when the containing element is removed from the DOM to avoid memory leaks — for example in a single-page app route teardown or a web component's `disconnectedCallback`.
+</Tip>
+
+## Editor status
+
+`editor.status` exposes the current `EditorStatus` enum value:
+
+```typescript
+import { EditorStatus } from '@milkdown/kit/core'
+
+console.log(editor.status)
+// 'Idle' | 'OnCreate' | 'Created' | 'OnDestroy' | 'Destroyed'
+```
+
+Subscribe to status changes with `editor.onStatusChange`:
+
+```typescript
+editor.onStatusChange((status) => {
+  console.log('Status:', status)
+})
+```
+
+## Full example
+
+```typescript
+import { defaultValueCtx, Editor, EditorStatus, rootCtx } from '@milkdown/kit/core'
+import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { getMarkdown, replaceAll } from '@milkdown/kit/utils'
+
+const INITIAL_CONTENT = '# Hello, Milkdown!\n\nStart typing your markdown here.'
+
+async function createEditor(container: HTMLElement) {
+  const editor = await Editor.make()
+    .config((ctx) => {
+      ctx.set(rootCtx, container)
+      ctx.set(defaultValueCtx, INITIAL_CONTENT)
+
+      ctx.get(listenerCtx).markdownUpdated((_, markdown) => {
+        console.log('Updated markdown:', markdown)
+      })
+    })
+    .use(commonmark)
+    .use(listener)
+    .create()
+
+  return editor
+}
+
+async function main() {
+  const container = document.getElementById('editor')
+  if (!container) return
+
+  const editor = await createEditor(container)
+
+  // Read the current content
+  const resetBtn = document.getElementById('reset')
+  resetBtn?.addEventListener('click', () => {
+    editor.action(replaceAll(INITIAL_CONTENT))
+  })
+
+  const readBtn = document.getElementById('read')
+  readBtn?.addEventListener('click', () => {
+    const md = editor.action(getMarkdown())
+    console.log('Current content:', md)
+  })
+
+  // Clean up when navigating away
+  window.addEventListener('beforeunload', () => {
+    editor.destroy()
+  })
+}
+
+main()
+```
+
+Corresponding HTML:
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Milkdown</title>
+  </head>
+  <body>
+    <div id="editor"></div>
+    <button id="reset">Reset</button>
+    <button id="read">Log content</button>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
+```
+
+## editor.action
+
+`editor.action` is the primary mechanism for interacting with the editor after creation. It accepts a function that receives the `Ctx` instance and can read or mutate slices.
+
+```typescript
+// Method signature
+readonly action = <T>(action: (ctx: Ctx) => T): T
+```
+
+The utilities in `@milkdown/kit/utils` (such as `getMarkdown`, `replaceAll`, and `insert`) are all action factories — they return `(ctx: Ctx) => T` and are passed directly to `editor.action`.
+
+You can write your own actions:
+
+```typescript
+import { editorViewCtx } from '@milkdown/kit/core'
+
+// Focus the editor programmatically
+editor.action((ctx) => {
+  ctx.get(editorViewCtx).focus()
+})
+```

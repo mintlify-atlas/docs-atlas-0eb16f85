@@ -1,0 +1,183 @@
+---
+title: "Table block"
+description: "A full-featured GFM table component with drag-and-drop rows/columns, insert/delete controls, and column alignment."
+---
+
+The `tableBlock` plugin replaces the default ProseMirror table node view with a rich interactive table component. It builds on top of `@milkdown/preset-gfm`'s table schema and adds:
+
+- Drag-and-drop reordering of rows and columns
+- Insert row and column buttons
+- Delete row and column buttons
+- Per-column text alignment (left, center, right)
+- Keyboard-accessible cell navigation
+
+<Note>
+  The component ships without any CSS. You must write your own styles to match your design.
+</Note>
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/components
+```
+
+```bash yarn
+yarn add @milkdown/components
+```
+
+```bash pnpm
+pnpm add @milkdown/components
+```
+
+</CodeGroup>
+
+## Exports
+
+| Name | Kind | Description |
+|------|------|-------------|
+| `tableBlock` | `MilkdownPlugin[]` | Plugin array — pass to `.use()` |
+| `tableBlockConfig` | `Ctx slice` | Config slice — update in `.config()` |
+| `tableBlockView` | `MilkdownPlugin` | The raw node view plugin |
+| `TableNodeView` | `class` | The ProseMirror `NodeView` implementation |
+| `TableBlockConfig` | `interface` | TypeScript config type |
+| `RenderType` | `type` | Union of all button type identifiers |
+
+## Basic usage
+
+The `tableBlock` component requires the GFM preset, which provides the underlying table schema.
+
+```typescript
+import { tableBlock, tableBlockConfig } from '@milkdown/components/table-block'
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { gfm } from '@milkdown/kit/preset/gfm'
+
+await Editor.make()
+  .use(commonmark)
+  .use(gfm)
+  .use(tableBlock)
+  .create()
+```
+
+## Configuration
+
+Update `tableBlockConfig` inside `editor.config` to customize the component.
+
+```typescript
+editor.config((ctx) => {
+  ctx.update(tableBlockConfig.key, (defaultConfig) => ({
+    ...defaultConfig,
+    // your overrides
+  }))
+})
+```
+
+### `TableBlockConfig` interface
+
+<ResponseField name="renderButton" type="(renderType: RenderType) => string" required>
+  Called for every interactive button in the table UI. Must return a plain string (text, emoji, or inline SVG). The `renderType` argument identifies which button is being rendered.
+
+  <Expandable title="RenderType values">
+    <ResponseField name="add_row" type='"add_row"'>
+      Button that appends a new row below the current row.
+    </ResponseField>
+    <ResponseField name="add_col" type='"add_col"'>
+      Button that appends a new column to the right of the current column.
+    </ResponseField>
+    <ResponseField name="delete_row" type='"delete_row"'>
+      Button that deletes the current row.
+    </ResponseField>
+    <ResponseField name="delete_col" type='"delete_col"'>
+      Button that deletes the current column.
+    </ResponseField>
+    <ResponseField name="align_col_left" type='"align_col_left"'>
+      Button that sets the current column's text alignment to left.
+    </ResponseField>
+    <ResponseField name="align_col_center" type='"align_col_center"'>
+      Button that sets the current column's text alignment to center.
+    </ResponseField>
+    <ResponseField name="align_col_right" type='"align_col_right"'>
+      Button that sets the current column's text alignment to right.
+    </ResponseField>
+    <ResponseField name="col_drag_handle" type='"col_drag_handle"'>
+      The drag handle shown at the top of each column header.
+    </ResponseField>
+    <ResponseField name="row_drag_handle" type='"row_drag_handle"'>
+      The drag handle shown at the left side of each row.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Default `renderButton` implementation
+
+```typescript
+(renderType) => {
+  switch (renderType) {
+    case 'add_row':       return '+'
+    case 'add_col':       return '+'
+    case 'delete_row':    return '-'
+    case 'delete_col':    return '-'
+    case 'align_col_left':   return 'left'
+    case 'align_col_center': return 'center'
+    case 'align_col_right':  return 'right'
+    case 'col_drag_handle':  return '='
+    case 'row_drag_handle':  return '='
+  }
+}
+```
+
+## Configuration examples
+
+### Custom button labels with icons
+
+```typescript
+import { tableBlockConfig } from '@milkdown/components/table-block'
+
+ctx.update(tableBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  renderButton: (renderType) => {
+    switch (renderType) {
+      case 'add_row':          return '+ Row'
+      case 'add_col':          return '+ Col'
+      case 'delete_row':       return '✕ Row'
+      case 'delete_col':       return '✕ Col'
+      case 'align_col_left':   return '←'
+      case 'align_col_center': return '↔'
+      case 'align_col_right':  return '→'
+      case 'col_drag_handle':  return '⠿'
+      case 'row_drag_handle':  return '⠿'
+    }
+  },
+}))
+```
+
+### Inline SVG icons
+
+Use `renderButton` to return inline SVG strings for fully custom icon designs.
+
+```typescript
+import { tableBlockConfig } from '@milkdown/components/table-block'
+
+const plusSvg = '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2"/></svg>'
+const trashSvg = '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 4h10M6 4V2h4v2M5 4v9h6V4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>'
+
+ctx.update(tableBlockConfig.key, (defaultConfig) => ({
+  ...defaultConfig,
+  renderButton: (renderType) => {
+    switch (renderType) {
+      case 'add_row':
+      case 'add_col':    return plusSvg
+      case 'delete_row':
+      case 'delete_col': return trashSvg
+      // ...
+      default:           return defaultConfig.renderButton(renderType)
+    }
+  },
+}))
+```
+
+<Warning>
+  `renderButton` must return a string. Returning `null`, `undefined`, or a React/Vue element will cause a runtime error.
+</Warning>

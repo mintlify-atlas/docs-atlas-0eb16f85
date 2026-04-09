@@ -1,0 +1,227 @@
+---
+title: plugin-tooltip
+description: Floating tooltip for Milkdown — factory function, provider class, and Floating UI integration for selection-based popovers.
+---
+
+The `@milkdown/plugin-tooltip` package provides the building blocks for creating selection-based floating toolbars (tooltips). Like the slash plugin, it does not ship a pre-built UI — you provide the HTML element and configure when the tooltip should appear. Positioning is handled by [Floating UI](https://floating-ui.com/) with `autoUpdate` support.
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @milkdown/plugin-tooltip
+```
+
+```bash yarn
+yarn add @milkdown/plugin-tooltip
+```
+
+```bash pnpm
+pnpm add @milkdown/plugin-tooltip
+```
+
+</CodeGroup>
+
+---
+
+## `tooltipFactory`
+
+Creates a named tooltip plugin. Call `tooltipFactory` with a unique string ID to get a two-element array `[specCtx, prosePlugin]`. Spread it into `.use()` to register both.
+
+```typescript
+export function tooltipFactory<Id extends string, State = any>(
+  id: Id
+): TooltipPlugin<Id, State>
+```
+
+The returned `TooltipPlugin` array also has two convenience properties:
+
+- `.key` — the `SliceType` for the `PluginSpec` context slice (`${id}_TOOLTIP_SPEC`).
+- `.pluginKey` — the `$Prose` key for the ProseMirror plugin.
+
+### Basic setup
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { tooltipFactory, TooltipProvider } from '@milkdown/plugin-tooltip'
+
+const tooltip = tooltipFactory('selectionTooltip')
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.set(tooltip.key, {
+      view: () => {
+        const content = document.getElementById('tooltip')!
+        const provider = new TooltipProvider({ content })
+
+        return {
+          update: (view, prevState) => provider.update(view, prevState),
+          destroy: () => provider.destroy(),
+        }
+      },
+    })
+  })
+  .use(commonmark)
+  .use(tooltip)
+  .create()
+```
+
+The `PluginSpec` set on `tooltip.key` is passed directly to the underlying ProseMirror `Plugin` constructor.
+
+---
+
+## `TooltipProvider`
+
+A helper class that manages positioning and visibility of the tooltip element using Floating UI.
+
+```typescript
+export class TooltipProvider {
+  element: HTMLElement
+  onShow: () => void
+  onHide: () => void
+
+  constructor(options: TooltipProviderOptions)
+
+  update(view: EditorView, prevState?: EditorState): void
+  show(virtualElement?: VirtualElement, editorView?: EditorView): void
+  hide(): void
+  destroy(): void
+}
+```
+
+### `TooltipProviderOptions`
+
+```typescript
+export interface TooltipProviderOptions {
+  content: HTMLElement
+  debounce?: number
+  shouldShow?: (view: EditorView, prevState?: EditorState) => boolean
+  offset?: OffsetOptions
+  shift?: ShiftOptions
+  middleware?: Middleware[]
+  floatingUIOptions?: Partial<ComputePositionConfig>
+  root?: HTMLElement
+}
+```
+
+<ParamField body="content" type="HTMLElement" required>
+  The HTML element used as the tooltip. The provider appends it to the editor's parent (or `root`) on first update and positions it with Floating UI.
+</ParamField>
+
+<ParamField body="debounce" type="number" default="200">
+  Throttle interval in milliseconds for the `update` handler. Uses `throttle` (not debounce) internally.
+</ParamField>
+
+<ParamField body="shouldShow" type="function">
+  Custom function to decide whether the tooltip should be visible. Receives the current `EditorView` and the previous `EditorState`. The built-in default shows the tooltip when there is a non-empty, non-readonly text selection.
+</ParamField>
+
+<ParamField body="offset" type="OffsetOptions">
+  Floating UI offset options. Passed to the `offset` middleware.
+</ParamField>
+
+<ParamField body="shift" type="ShiftOptions">
+  Floating UI shift options. Passed to the `shift` middleware to keep the tooltip visible within the viewport.
+</ParamField>
+
+<ParamField body="middleware" type="Middleware[]">
+  Additional Floating UI middleware appended after the built-in `flip`, `offset`, and `shift` middlewares.
+</ParamField>
+
+<ParamField body="floatingUIOptions" type="Partial<ComputePositionConfig>">
+  Full Floating UI `computePosition` options. Setting `middleware` or `placement` here overrides the internal defaults. Default placement is `top`.
+</ParamField>
+
+<ParamField body="root" type="HTMLElement">
+  The DOM element the tooltip is appended to. When `root` differs from the editor's parent element, `autoUpdate` is used to keep the tooltip repositioned as the page scrolls.
+</ParamField>
+
+### Methods
+
+<AccordionGroup>
+  <Accordion title="update(view, prevState?)">
+    Call this from the ProseMirror plugin view's `update` method. Throttles internally and repositions the tooltip when it should be shown. Uses Floating UI `autoUpdate` when the tooltip's root differs from the editor's parent.
+  </Accordion>
+
+  <Accordion title="show(virtualElement?, editorView?)">
+    Shows the tooltip by setting `element.dataset.show = 'true'` and calls `onShow()`. Optionally accepts a `VirtualElement` to reposition the tooltip relative to a custom reference, and the `EditorView` to determine whether `autoUpdate` is needed.
+  </Accordion>
+
+  <Accordion title="hide()">
+    Sets `element.dataset.show = 'false'` and calls `onHide()`. No-ops if the tooltip is already hidden.
+  </Accordion>
+
+  <Accordion title="destroy()">
+    Cleans up `autoUpdate` subscriptions and cancels the throttled updater. Call this from the ProseMirror plugin view's `destroy` method.
+  </Accordion>
+</AccordionGroup>
+
+### Callbacks
+
+- **`onShow`** — called when the tooltip becomes visible.
+- **`onHide`** — called when the tooltip is hidden.
+
+---
+
+## Default `shouldShow` behaviour
+
+The built-in `shouldShow` implementation hides the tooltip when:
+
+- The editor does not have focus (and the tooltip element itself does not contain the active element).
+- The selection is empty.
+- The selection spans only whitespace (empty text block).
+- The editor is in read-only mode.
+
+Override `shouldShow` to show the tooltip for different conditions, such as node selections.
+
+---
+
+## Visibility toggling via `data-show`
+
+```css
+#tooltip {
+  display: none;
+  position: absolute;
+}
+
+#tooltip[data-show='true'] {
+  display: flex;
+}
+```
+
+---
+
+## Complete example
+
+```typescript
+import { Editor } from '@milkdown/kit/core'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { tooltipFactory, TooltipProvider } from '@milkdown/plugin-tooltip'
+
+const tooltip = tooltipFactory('formatting')
+
+const editor = await Editor.make()
+  .config((ctx) => {
+    ctx.set(tooltip.key, {
+      view: () => {
+        const content = document.createElement('div')
+        content.innerHTML = '<button data-action="bold">B</button>'
+
+        const provider = new TooltipProvider({
+          content,
+          shouldShow: (view) => !view.state.selection.empty,
+        })
+
+        return {
+          update: (view, prevState) => provider.update(view, prevState),
+          destroy: () => provider.destroy(),
+        }
+      },
+    })
+  })
+  .use(commonmark)
+  .use(tooltip)
+  .create()
+```
